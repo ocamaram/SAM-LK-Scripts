@@ -17,6 +17,9 @@ inclinacion = 30;
 // timestep en minutos para el análisis de series temporales (60 → 8760 puntos/año)
 timestep_min = 60;
 
+// Ruta al script Python de post-proceso (dejar vacío para omitir)
+py_script = cwd() + '/shade_postprocess.py';
+
 // ── RUTA DE EXPORTACIÓN ──────────────────────────────────
 export_dir = choose_dir(homedir(), 'Carpeta de exportación de sombras');
 if (export_dir == '')
@@ -179,6 +182,17 @@ else
             ok = csvwrite(diff_file, csv_diff);
             if (ok) { outln('Sombra difusa exportada: ' + diff_file); }
             else    { outln('ERROR: no se pudo escribir ' + diff_file); }
+        }
+
+        // ── POST-PROCESO PYTHON ───────────────────────────
+        if (py_script != '' && diff_file != '')
+        {
+            outln('');
+            outln('Lanzando post-proceso Python...');
+            cmd = 'python3 "' + py_script + '" --ts "' + ts_file + '" --diff "' + diff_file + '" --out "' + export_dir + '"';
+            exit_code = system(cmd);
+            if (exit_code == 0) { outln('Post-proceso completado correctamente.'); }
+            else                { outln('Error en el post-proceso Python (código ' + exit_code + ').'); }
         }
 
         browse(export_dir);

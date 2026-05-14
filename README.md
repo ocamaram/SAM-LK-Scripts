@@ -4,6 +4,14 @@ Librería de scripts LK para [NREL System Advisor Model (SAM)](https://sam.nrel.
 
 ---
 
+## Instalación de dependencias Python
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
 ## Scripts disponibles
 
 ### `SAM_3D_Shading.lk` — Generador de superficies activas y análisis de sombras
@@ -48,8 +56,32 @@ Genera una cuadrícula de superficies activas en el **3D Shade Calculator** de S
 |---|---|
 | `shade_timeseries_az<A>_inc<I>.csv` | 8 760 filas × n_grupos columnas con el factor de sombra directa horario (0–1) por subarray+string |
 | `shade_diffuse_az<A>_inc<I>.csv` | Una fila por grupo con el porcentaje de sombra difusa (%) |
+| `summary_statistics.csv` | Resumen estadístico por grupo (generado por `shade_postprocess.py`) |
+| `seasonal_hourly_curves.png` | Curvas horarias promedio de sombra por estación |
+| `heatmap_panel_geometry.png` | Heatmap estacional y anual sobre la geometría de paneles |
 
 El nombre de cada columna sigue el formato `SA<subarray>_ST<string>` (ej. `SA1_ST3`).
+
+---
+
+### `shade_postprocess.py` — Post-procesado de resultados
+
+Script Python que consume los CSVs generados por el LK y produce visualizaciones de análisis. Se puede ejecutar manualmente o es llamado automáticamente desde el LK si `py_script` apunta a él.
+
+```bash
+python3 shade_postprocess.py \
+  --ts  shade_timeseries_az180_inc30.csv \
+  --diff shade_diffuse_az180_inc30.csv \
+  --out  ./resultados
+```
+
+#### Salidas
+
+| Archivo | Descripción |
+|---|---|
+| `summary_statistics.csv` | Media, mediana, P90, máximo y horas con sombra >10 % y >50 % por grupo |
+| `seasonal_hourly_curves.png` | 4 subplots (Invierno/Primavera/Verano/Otoño): sombra media horaria por grupo + media del array |
+| `heatmap_panel_geometry.png` | Grid Subarray × String con valor de sombra (%) por estación y anual |
 
 ---
 
