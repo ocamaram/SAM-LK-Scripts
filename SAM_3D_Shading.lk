@@ -17,6 +17,8 @@ inclinacion = 30;
 // timestep en minutos para el análisis de series temporales (60 → 8760 puntos/año)
 timestep_min = 60;
 
+// Ruta completa al script Python de post-proceso
+py_script = '/Users/cammor/Visual Studio Code/SAM/shade_postprocess.py';
 
 // ── RUTA DE EXPORTACIÓN ──────────────────────────────────
 export_dir = choose_dir(homedir(), 'Carpeta de exportación de sombras');
@@ -122,10 +124,21 @@ else
     outln('--- Total: ' + n_total + ' de ' + max_surfaces);
     outln('');
 
+    // ── VALIDAR UBICACIÓN ────────────────────────────────
+    loc = location();
+    if (loc.lat == 0 && loc.lon == 0)
+    {
+        outln('ERROR: Ubicación no configurada.');
+        outln('Ve a la pestaña Location y configura latitud, longitud y zona horaria antes de ejecutar.');
+        exit;
+    }
+    outln('Ubicación: lat=' + loc.lat + '  lon=' + loc.lon + '  tz=' + loc.tz);
+
     // ── ANÁLISIS TIME SERIES (sombra directa/beam) ────────
     outln('Calculando series temporales de sombra directa...');
     switch_to(2);
     uiyield();
+    millisleep(500);
 
     ts = direct_shade(timestep_min);
 
@@ -186,14 +199,8 @@ else
         // ── INSTRUCCIONES POST-PROCESO ────────────────────
         outln('');
         outln('Para generar estadísticas y gráficos, ejecuta en Terminal:');
-        if (diff_file != '')
-        {
-            outln('  python3 shade_postprocess.py --ts "' + ts_file + '" --diff "' + diff_file + '" --out "' + export_dir + '"');
-        }
-        else
-        {
-            outln('  python3 shade_postprocess.py --ts "' + ts_file + '" --diff "" --out "' + export_dir + '"');
-        }
+        diff_arg = (diff_file != '') ? '"' + diff_file + '"' : '""';
+        outln('  python3 "' + py_script + '" --ts "' + ts_file + '" --diff ' + diff_arg + ' --out "' + export_dir + '"');
 
         outln('');
         outln('Completado. Archivos guardados en: ' + export_dir);
