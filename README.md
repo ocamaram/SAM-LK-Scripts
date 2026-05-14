@@ -1,0 +1,72 @@
+# SAM LK Scripts
+
+Librería de scripts LK para [NREL System Advisor Model (SAM)](https://sam.nrel.gov/), orientada al análisis de sombreado 3D y simulación de sistemas fotovoltaicos.
+
+---
+
+## Scripts disponibles
+
+### `SAM_3D_Shading.lk` — Generador de superficies activas y análisis de sombras
+
+Genera una cuadrícula de superficies activas en el **3D Shade Calculator** de SAM, lanza el análisis de series temporales y exporta los porcentajes de sombra por subarray y string a CSV.
+
+#### Características
+
+- Crea `rows × cols` superficies activas con orientación (azimut + inclinación) configurable.
+- Asigna automáticamente cada superficie a su subarray y string correspondientes.
+- **Preserva la geometría de obstáculos existente** (edificios, árboles, cajas…) — solo elimina las superficies activas previas.
+- Ejecuta el análisis de sombra directa en series temporales (`direct_shade`) con el paso temporal deseado.
+- Ejecuta el análisis de sombra difusa (`diffuse_shade`).
+- Exporta dos archivos CSV a la carpeta elegida por el usuario.
+
+#### Parámetros
+
+| Parámetro | Descripción | Valor por defecto |
+|---|---|---|
+| `rows` | Número de filas de superficies | `4` |
+| `cols` | Número de columnas de superficies | `8` |
+| `x0`, `y0`, `z0` | Origen de la cuadrícula (m) | `0.0` |
+| `spacing_x` | Separación entre filas (m) | `1.0` |
+| `spacing_y` | Separación entre columnas (m) | `1.0` |
+| `azimut` | Orientación solar de la superficie — 0=N, 90=E, 180=S, 270=O (°) | `180` |
+| `inclinacion` | Inclinación — 0=horizontal, 90=vertical/fachada (°) | `30` |
+| `timestep_min` | Paso temporal del análisis de series temporales (min) | `60` |
+
+> **Límites SAM:** máximo 4 subarrays × 8 strings = 32 superficies activas.
+
+#### Uso
+
+1. Abre el **3D Shade Calculator** desde la pestaña *Shading* de tu caso SAM.
+2. Configura la **ubicación** en la pestaña *Location* (necesaria para el cálculo solar).
+3. Añade opcionalmente los **obstáculos** de sombra (edificios, árboles…) en la pestaña *3D Scene*.
+4. Abre la pestaña *Scripting*, carga `SAM_3D_Shading.lk` y ajusta los parámetros de la sección `PARÁMETROS`.
+5. Ejecuta el script. Se abrirá un diálogo para elegir la carpeta de exportación.
+
+#### Archivos de salida
+
+| Archivo | Contenido |
+|---|---|
+| `shade_timeseries_az<A>_inc<I>.csv` | 8 760 filas × n_grupos columnas con el factor de sombra directa horario (0–1) por subarray+string |
+| `shade_diffuse_az<A>_inc<I>.csv` | Una fila por grupo con el porcentaje de sombra difusa (%) |
+
+El nombre de cada columna sigue el formato `SA<subarray>_ST<string>` (ej. `SA1_ST3`).
+
+---
+
+## Requisitos
+
+- SAM 2022.11.21 o superior (testado en SAM 2024.12.12).
+- El script debe ejecutarse desde el **scripting del 3D Shade Calculator**, no desde el scripting general de SAM.
+
+---
+
+## Roadmap
+
+- [ ] Script de análisis paramétrico (ubicación × inclinación)
+- [ ] Script de generación de obstáculos de sombra desde CSV
+
+---
+
+## Licencia
+
+MIT
