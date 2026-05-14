@@ -66,6 +66,12 @@ if (n_total > max_surfaces)
 }
 else
 {
+    // Volver siempre a la pestaña Scene antes de modificar objetos
+    // (si la ejecución anterior terminó en Analyze, borrar objetos desde esa pestaña crashea SAM)
+    switch_to(1);
+    uiyield();
+    millisleep(500);
+
     // ── ELIMINAR SOLO SUPERFICIES ACTIVAS PREVIAS ────────
     // Los obstáculos (Tree, Box, etc.) no tienen la propiedad 'Subarray' → se conservan
     existing = objects();
