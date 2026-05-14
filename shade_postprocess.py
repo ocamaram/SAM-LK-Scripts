@@ -75,8 +75,8 @@ def build_time_index(n):
 
 # ── ESTADÍSTICAS ────────────────────────────────────────────────────────────
 
-def compute_statistics(ts, diff):
-    stats = pd.DataFrame({
+def compute_statistics(ts):
+    return pd.DataFrame({
         'sombra_media_%':   (ts.mean()          * 100).round(2),
         'sombra_mediana_%': (ts.median()         * 100).round(2),
         'sombra_p90_%':     (ts.quantile(0.90)   * 100).round(2),
@@ -85,13 +85,6 @@ def compute_statistics(ts, diff):
         'h_sombra_>10%':    (ts > 0.10).sum(),
         'h_sombra_>50%':    (ts > 0.50).sum(),
     })
-    # Añadir sombra difusa si los grupos coinciden
-    if diff is not None:
-        col = diff.columns[0]
-        stats['sombra_difusa_%'] = stats.index.map(
-            lambda g: diff.loc[g, col] if g in diff.index else np.nan
-        )
-    return stats
 
 
 # ── CURVAS HORARIAS POR ESTACIÓN ─────────────────────────────────────────────
@@ -284,7 +277,6 @@ def plot_heatmaps(grids, n_sa, n_st, panel_w, panel_l, out_path):
 def main():
     parser = argparse.ArgumentParser(description='Post-proceso sombras SAM')
     parser.add_argument('--ts',     required=True,       help='CSV series temporales')
-    parser.add_argument('--diff',   required=True,       help='CSV sombra difusa')
     parser.add_argument('--out',    required=True,       help='Carpeta de salida')
     parser.add_argument('--width',  type=float, default=1.0, help='Ancho del panel (m)')
     parser.add_argument('--length', type=float, default=1.0, help='Largo del panel (m)')
@@ -307,22 +299,9 @@ def main():
         ts_raw = ts_raw / 100.0
         print('  Valores time series convertidos de % a fracción (0-1).')
 
-    try:
-        diff_raw = pd.read_csv(args.diff, index_col=0)
-        # Renombrar índice del diffuse al mismo formato SA<N>_ST<M>
-        diff_raw.index = [group_label(i) for i in diff_raw.index]
-        # Los valores del diffuse son fracción (0-1) → convertir a %
-        col = diff_raw.columns[0]
-        if diff_raw[col].max() <= 1.5:
-            diff_raw[col] = diff_raw[col] * 100.0
-            print('  Valores diffuse convertidos de fracción a %.')
-    except Exception:
-        diff_raw = None
-        print('  AVISO: no se pudo cargar el CSV de sombra difusa.')
-
     # ── Estadísticas ─────────────────────────────────────────────
     print('Calculando estadísticas...')
-    stats = compute_statistics(ts_raw, diff_raw)
+    stats = compute_statistics(ts_raw)
     stats_path = os.path.join(args.out, 'summary_statistics.csv')
     stats.to_csv(stats_path)
     print(f'  Estadísticas → {stats_path}')

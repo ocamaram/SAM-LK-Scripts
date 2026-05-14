@@ -66,17 +66,9 @@ if (n_total > max_surfaces)
 }
 else
 {
-    // Pre-inicializar pestaña Analyze (evita crash en primera ejecución)
-    switch_to(2);
-    uiyield();
-    millisleep(300);
-    switch_to(1);
-    uiyield();
-    millisleep(300);
-
     // ── ELIMINAR SOLO SUPERFICIES ACTIVAS PREVIAS ────────
-    // Identifica active surfaces por la presencia de la propiedad 'Subarray'
-    // Los obstáculos (Tree, Box, etc.) no tienen esa propiedad → se conservan
+    // Primero borrar para que la pestaña Analyze se inicialice con escena limpia
+    // Los obstáculos (Tree, Box, etc.) no tienen la propiedad 'Subarray' → se conservan
     existing = objects();
     for (i = 0; i < #existing; i++)
     {
@@ -92,6 +84,14 @@ else
         }
     }
     uiyield();
+
+    // Pre-inicializar pestaña Analyze con escena ya limpia (evita crash)
+    switch_to(2);
+    uiyield();
+    millisleep(300);
+    switch_to(1);
+    uiyield();
+    millisleep(300);
 
     // ── CREAR SUPERFICIES ACTIVAS ─────────────────────────
     idx = 0;
@@ -188,31 +188,9 @@ else
         if (ok) { outln('Serie temporal exportada: ' + ts_file); }
         else    { outln('ERROR: no se pudo escribir ' + ts_file); }
 
-        // ── ANÁLISIS SOMBRA DIFUSA ────────────────────────
-        outln('Calculando sombra difusa...');
-        diff = diffuse_shade();
-
-        if (diff != null)
-        {
-            diff_keys = @diff;
-            csv_diff[0][0] = 'Grupo';
-            csv_diff[0][1] = 'Sombra_difusa_%';
-            for (k = 0; k < #diff_keys; k++)
-            {
-                csv_diff[k+1][0] = diff_keys[k];
-                csv_diff[k+1][1] = diff{diff_keys[k]};
-            }
-
-            diff_file = export_dir + '/shade_diffuse_az' + azimut + '_inc' + inclinacion + '.csv';
-            ok = csvwrite(diff_file, csv_diff);
-            if (ok) { outln('Sombra difusa exportada: ' + diff_file); }
-            else    { outln('ERROR: no se pudo escribir ' + diff_file); }
-        }
-
         // ── POST-PROCESO PYTHON ───────────────────────────
         outln('');
-        diff_arg = (diff_file != '') ? '"' + diff_file + '"' : '""';
-        py_cmd = 'python3 "' + py_script + '" --ts "' + ts_file + '" --diff ' + diff_arg + ' --out "' + export_dir + '" --width ' + panel_width + ' --length ' + panel_length;
+        py_cmd = 'python3 "' + py_script + '" --ts "' + ts_file + '" --out "' + export_dir + '" --width ' + panel_width + ' --length ' + panel_length;
 
         // Escribir comando en /tmp (sin espacios) y ejecutarlo con system()
         sh_file = '/tmp/sam_shade_post.sh';
