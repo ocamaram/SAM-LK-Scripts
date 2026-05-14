@@ -1,0 +1,188 @@
+// ── PARÁMETROS ──────────────────────────────────────────
+rows = 4;
+cols = 8;
+
+x0 = 0.0;
+y0 = 0.0;
+z0 = 0.0;
+
+spacing_x = 1.0;   // separación entre filas
+spacing_y = 1.0;   // separación entre columnas
+
+// azimut: orientacion solar de la superficie (0=N, 90=E, 180=S, 270=O)
+// inclinacion: 0=horizontal (suelo), 90=vertical (fachada)
+azimut     = 180;
+inclinacion = 30;
+
+// timestep en minutos para el análisis de series temporales (60 → 8760 puntos/año)
+timestep_min = 60;
+
+// ── RUTA DE EXPORTACIÓN ──────────────────────────────────
+export_dir = choose_dir(homedir(), 'Carpeta de exportación de sombras');
+if (export_dir == '')
+{
+    outln('Operación cancelada.');
+    exit;
+}
+
+// ── CONVERSIÓN A SAM ─────────────────────────────────────
+PI = 3.14159265;
+
+ori_rad = (azimut + 180) * PI / 180;
+inc_rad = inclinacion * PI / 180;
+
+dir_hx =  cos(ori_rad);
+dir_hy = -sin(ori_rad);
+
+dir_sx = sin(ori_rad) * cos(inc_rad);
+dir_sy = cos(ori_rad) * cos(inc_rad);
+dir_sz = sin(inc_rad);
+
+nx = -sin(ori_rad) * sin(inc_rad);
+ny = -cos(ori_rad) * sin(inc_rad);
+nz =  cos(inc_rad);
+
+sam_tilt = acos(nz) * 180 / PI;
+sam_az   = atan2(nx, ny) * 180 / PI;
+if (sam_az < 0) { sam_az = sam_az + 360; }
+
+// ── LÍMITES ──────────────────────────────────────────────
+max_subarrays = 4;
+max_strings   = 8;
+max_surfaces  = max_subarrays * max_strings;
+
+// ── VALIDACIÓN ───────────────────────────────────────────
+n_total = rows * cols;
+
+if (n_total > max_surfaces)
+{
+    outln('ERROR: ' + n_total + ' superficies solicitadas, máximo permitido = ' + max_surfaces);
+    outln('Reduce rows (' + rows + ') x cols (' + cols + ') a un máximo de ' + max_surfaces);
+}
+else
+{
+    // ── ELIMINAR SOLO SUPERFICIES ACTIVAS PREVIAS ────────
+    // Identifica active surfaces por la presencia de la propiedad 'Subarray'
+    // Los obstáculos (Tree, Box, etc.) no tienen esa propiedad → se conservan
+    existing = objects();
+    for (i = 0; i < #existing; i++)
+    {
+        props = property(existing[i]);
+        keys  = @props;
+        for (j = 0; j < #keys; j++)
+        {
+            if (keys[j] == 'Subarray')
+            {
+                delete(existing[i]);
+                break;
+            }
+        }
+    }
+
+    // ── CREAR SUPERFICIES ACTIVAS ─────────────────────────
+    idx = 0;
+
+    for (r = 0; r < rows; r++)
+    {
+        for (c = 0; c < cols; c++)
+        {
+            subarray = to_int(idx / max_strings) + 1;
+            string   = idx - to_int(idx / max_strings) * max_strings + 1;
+
+            px = x0 + c * spacing_y * dir_hx + r * spacing_x * dir_sx;
+            py = y0 + c * spacing_y * dir_hy + r * spacing_x * dir_sy;
+            pz = z0 +                          r * spacing_x * dir_sz;
+
+            p = {};
+            p.Name     = 'AS_az' + azimut + '_inc' + inclinacion + '_sub' + subarray + '_str' + string;
+            p.Subarray = subarray - 1;
+            p.String   = string - 1;
+            p.Group    = 'SA' + subarray + '_ST' + string;  // grupo único por subarray+string
+            p.X        = px;
+            p.Y        = py;
+            p.Z        = pz;
+            p.Width    = 1.0;
+            p.Length   = 1.0;
+            p.Azimuth  = sam_az;
+            p.Tilt     = sam_tilt;
+            p.Shape    = 'rectangle';
+
+            obj = create('Active surface');
+            property(obj, p);
+
+            outln('Creada: ' + p.Name + '  X=' + px + '  Y=' + py + '  Z=' + pz);
+
+            idx = idx + 1;
+        }
+    }
+
+    outln('--- Azimut=' + azimut + '  Inclinacion=' + inclinacion);
+    outln('--- SAM Tilt=' + sam_tilt + '  SAM Az=' + sam_az);
+    outln('--- Total: ' + n_total + ' de ' + max_surfaces);
+    outln('');
+
+    // ── ANÁLISIS TIME SERIES (sombra directa/beam) ────────
+    outln('Calculando series temporales de sombra directa...');
+    switch_to(2);
+    uiyield();
+
+    ts = direct_shade(timestep_min);
+
+    if (ts == null)
+    {
+        outln('ERROR: direct_shade() falló. Verifica que la ubicación esté configurada (pestaña Location).');
+    }
+    else
+    {
+        groups   = @ts;
+        n_groups = #groups;
+        n_points = #ts{groups[0]};
+        outln('Grupos: ' + n_groups + '   Puntos temporales: ' + n_points);
+
+        // construir array 2D para CSV:  fila 0 = cabecera, filas 1..n_points = datos
+        csv_ts[0][0] = 'Hora';
+        for (k = 0; k < n_groups; k++)
+        {
+            csv_ts[0][k+1] = groups[k];
+        }
+
+        for (h = 0; h < n_points; h++)
+        {
+            csv_ts[h+1][0] = h + 1;
+            for (k = 0; k < n_groups; k++)
+            {
+                csv_ts[h+1][k+1] = ts{groups[k]}[h];
+            }
+        }
+
+        ts_file = export_dir + '/shade_timeseries_az' + azimut + '_inc' + inclinacion + '.csv';
+        ok = csvwrite(ts_file, csv_ts);
+        if (ok) { outln('Serie temporal exportada: ' + ts_file); }
+        else    { outln('ERROR: no se pudo escribir ' + ts_file); }
+
+        // ── ANÁLISIS SOMBRA DIFUSA ────────────────────────
+        outln('Calculando sombra difusa...');
+        diff = diffuse_shade();
+
+        if (diff != null)
+        {
+            diff_keys = @diff;
+            csv_diff[0][0] = 'Grupo';
+            csv_diff[0][1] = 'Sombra_difusa_%';
+            for (k = 0; k < #diff_keys; k++)
+            {
+                csv_diff[k+1][0] = diff_keys[k];
+                csv_diff[k+1][1] = diff{diff_keys[k]};
+            }
+
+            diff_file = export_dir + '/shade_diffuse_az' + azimut + '_inc' + inclinacion + '.csv';
+            ok = csvwrite(diff_file, csv_diff);
+            if (ok) { outln('Sombra difusa exportada: ' + diff_file); }
+            else    { outln('ERROR: no se pudo escribir ' + diff_file); }
+        }
+
+        browse(export_dir);
+        outln('');
+        outln('Completado. Archivos guardados en: ' + export_dir);
+    }
+}
