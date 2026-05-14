@@ -195,7 +195,6 @@ else
             outln('  python3 shade_postprocess.py --ts "' + ts_file + '" --diff "" --out "' + export_dir + '"');
         }
 
-        browse(export_dir);
         outln('');
         outln('Completado. Archivos guardados en: ' + export_dir);
     }
