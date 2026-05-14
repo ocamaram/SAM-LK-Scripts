@@ -35,9 +35,36 @@ SEASON_COLORS = {
 
 
 def parse_group(name):
-    """'SA2_ST5' → (subarray=2, string=5). Devuelve None si no encaja el patrón."""
+    """
+    Parsea el identificador de grupo a (subarray_1based, string_1based).
+    Formatos soportados:
+      '3.5'               → SAM interno 0-based  → (4, 6)
+      'SA2_ST5'           → nuestro formato       → (2, 5)
+      'Subarray 4, String 6' → nombre display SAM → (4, 6)
+    Devuelve None si no encaja ningún patrón.
+    """
+    name = str(name).strip()
+    # '3.5' o '0.0' → subarray.string 0-based
+    m = re.match(r'^(\d+)\.(\d+)$', name)
+    if m:
+        return (int(m.group(1)) + 1, int(m.group(2)) + 1)
+    # 'SA2_ST5'
     m = re.match(r'SA(\d+)_ST(\d+)', name)
-    return (int(m.group(1)), int(m.group(2))) if m else None
+    if m:
+        return (int(m.group(1)), int(m.group(2)))
+    # 'Subarray 4, String 6'
+    m = re.match(r'Subarray\s+(\d+),\s+String\s+(\d+)', name)
+    if m:
+        return (int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def group_label(name):
+    """Convierte cualquier formato de grupo a 'SA<N>_ST<M>' legible."""
+    parsed = parse_group(name)
+    if parsed:
+        return f'SA{parsed[0]}_ST{parsed[1]}'
+    return name
 
 
 def build_time_index(n):
@@ -58,8 +85,6 @@ def compute_statistics(ts, diff):
     })
     # Añadir sombra difusa si los grupos coinciden
     if diff is not None:
-        diff.index = diff.index.str.strip()
-        diff.columns = diff.columns.str.strip()
         col = diff.columns[0]
         stats['sombra_difusa_%'] = stats.index.map(
             lambda g: diff.loc[g, col] if g in diff.index else np.nan
@@ -236,10 +261,26 @@ def main():
     print('Cargando datos...')
     ts_raw = pd.read_csv(args.ts, index_col=0)
     ts_raw.index = build_time_index(len(ts_raw))
+
+    # Renombrar columnas al formato legible SA<N>_ST<M>
+    ts_raw.columns = [group_label(c) for c in ts_raw.columns]
     groups = list(ts_raw.columns)
+    print(f'  {len(groups)} grupos: {groups[:4]}{"..." if len(groups) > 4 else ""}')
+
+    # Los valores del time series están en % (0-100) → normalizar a fracción 0-1
+    if ts_raw.max().max() > 1.5:
+        ts_raw = ts_raw / 100.0
+        print('  Valores time series convertidos de % a fracción (0-1).')
 
     try:
         diff_raw = pd.read_csv(args.diff, index_col=0)
+        # Renombrar índice del diffuse al mismo formato SA<N>_ST<M>
+        diff_raw.index = [group_label(i) for i in diff_raw.index]
+        # Los valores del diffuse son fracción (0-1) → convertir a %
+        col = diff_raw.columns[0]
+        if diff_raw[col].max() <= 1.5:
+            diff_raw[col] = diff_raw[col] * 100.0
+            print('  Valores diffuse convertidos de fracción a %.')
     except Exception:
         diff_raw = None
         print('  AVISO: no se pudo cargar el CSV de sombra difusa.')
