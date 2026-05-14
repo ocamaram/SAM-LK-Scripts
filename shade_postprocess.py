@@ -17,7 +17,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, Normalize
+from matplotlib.cm import ScalarMappable
+from matplotlib.patches import Rectangle
 
 # ── ESTACIONES (hemisferio norte) ───────────────────────────────────────────
 SEASONS = {
@@ -191,39 +193,50 @@ def plot_heatmaps(grids, n_sa, n_st, panel_w, panel_l, out_path):
     labels  = list(grids.keys())   # 4 estaciones + Anual
     n_plots = len(labels)          # 5
 
-    # Ratio físico de cada celda: alto/ancho = panel_l / panel_w
-    cell_ratio = panel_l / panel_w
-
-    # Tamaño de cada subplot proporcional a la geometría real del array
-    cell_px   = 0.6                          # ancho de celda en pulgadas
-    ax_w = n_st * cell_px
-    ax_h = n_sa * cell_px * cell_ratio
-
-    n_cols, n_rows = 3, 2
-    fig_w = n_cols * (ax_w + 1.0) + 0.5     # margen para colorbar
-    fig_h = n_rows * (ax_h + 1.0) + 0.8     # margen para título
-
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h),
-                              gridspec_kw={'wspace': 0.5, 'hspace': 0.6})
-    axes_flat = axes.flatten()
-
     all_vals = np.concatenate([g[~np.isnan(g)] for g in grids.values()])
     vmin, vmax = np.percentile(all_vals, 2), np.percentile(all_vals, 98)
 
-    cmap = LinearSegmentedColormap.from_list(
+    cmap  = LinearSegmentedColormap.from_list(
         'shade', ['#fffde7', '#ffcc02', '#e65100'], N=256
     )
+    norm  = Normalize(vmin=vmin, vmax=vmax)
+    sm    = ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
 
-    # extent: [xmin, xmax, ymax, ymin] en unidades físicas (metros)
-    extent = [-0.5 * panel_w, (n_st - 0.5) * panel_w,
-               (n_sa - 0.5) * panel_l, -0.5 * panel_l]
+    # Tamaño de figura proporcional a la geometría real del array
+    cell_in = 0.55                              # pulgadas por metro de panel
+    ax_w = n_st * panel_w * cell_in
+    ax_h = n_sa * panel_l * cell_in
+
+    n_cols, n_rows = 3, 2
+    fig_w = n_cols * (ax_w + 1.1) + 0.4
+    fig_h = n_rows * (ax_h + 0.9) + 0.6
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h),
+                              gridspec_kw={'wspace': 0.5, 'hspace': 0.7})
+    axes_flat = axes.flatten()
 
     for idx, label in enumerate(labels):
         ax = axes_flat[idx]
         grid = grids[label]
 
-        im = ax.imshow(grid, cmap=cmap, vmin=vmin, vmax=vmax,
-                       origin='upper', extent=extent, aspect='equal')
+        # Dibujar cada panel como un Rectangle explícito
+        for sa in range(n_sa):
+            for st in range(n_st):
+                val = grid[sa, st]
+                if np.isnan(val):
+                    continue
+                color = cmap(norm(val))
+                rect = Rectangle(
+                    xy=(st * panel_w, sa * panel_l),
+                    width=panel_w, height=panel_l,
+                    facecolor=color, edgecolor='white', linewidth=0.5
+                )
+                ax.add_patch(rect)
+
+        ax.set_xlim(0, n_st * panel_w)
+        ax.set_ylim(n_sa * panel_l, 0)      # Y invertido: SA1 arriba
+        ax.set_aspect('equal')
 
         season_color = SEASON_COLORS.get(label, '#333333')
         ax.set_title(label, fontsize=10, fontweight='bold', color=season_color)
@@ -231,12 +244,12 @@ def plot_heatmaps(grids, n_sa, n_st, panel_w, panel_l, out_path):
         ax.set_ylabel('Subarray', fontsize=8)
 
         # Ticks centrados en cada celda
-        ax.set_xticks([c * panel_w for c in range(n_st)])
-        ax.set_xticklabels([f'ST{c+1}' for c in range(n_st)], fontsize=6)
-        ax.set_yticks([r * panel_l for r in range(n_sa)])
-        ax.set_yticklabels([f'SA{r+1}' for r in range(n_sa)], fontsize=6)
+        ax.set_xticks([(st + 0.5) * panel_w for st in range(n_st)])
+        ax.set_xticklabels([f'ST{st+1}' for st in range(n_st)], fontsize=6)
+        ax.set_yticks([(sa + 0.5) * panel_l for sa in range(n_sa)])
+        ax.set_yticklabels([f'SA{sa+1}' for sa in range(n_sa)], fontsize=6)
 
-        cbar = plt.colorbar(im, ax=ax, shrink=0.85, pad=0.03)
+        cbar = plt.colorbar(sm, ax=ax, shrink=0.85, pad=0.03)
         cbar.set_label('Sombra (%)', fontsize=7)
         cbar.ax.tick_params(labelsize=6)
 
