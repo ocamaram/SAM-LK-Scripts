@@ -26,6 +26,7 @@ timestep_min = 60;
 export_dir  = cwd();
 results_dir = export_dir + '/Results';
 py_script   = export_dir + '/shade_postprocess.py';
+py_exec     = export_dir + '/.venv/bin/python3';
 outln('Directorio de trabajo: ' + export_dir);
 outln('Carpeta de resultados: ' + results_dir);
 
@@ -182,7 +183,7 @@ else
 
         // ── POST-PROCESO PYTHON ───────────────────────────
         outln('');
-        py_cmd = 'python3 "' + py_script + '" --ts "' + ts_file + '" --out "' + results_dir + '" --width ' + panel_width + ' --length ' + panel_length;
+        py_cmd = '"' + py_exec + '" "' + py_script + '" --ts "' + ts_file + '" --out "' + results_dir + '" --width ' + panel_width + ' --length ' + panel_length;
 
         // Escribir comando en /tmp (sin espacios) y ejecutarlo con system()
         sh_file = '/tmp/sam_shade_post.sh';

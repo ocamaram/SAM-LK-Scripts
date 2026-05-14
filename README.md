@@ -7,6 +7,8 @@ Librería de scripts LK para [NREL System Advisor Model (SAM)](https://sam.nrel.
 ## Instalación de dependencias Python
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
