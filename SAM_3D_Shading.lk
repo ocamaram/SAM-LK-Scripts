@@ -22,10 +22,13 @@ inclinacion = 30;
 // timestep en minutos para el análisis de series temporales (60 → 8760 puntos/año)
 timestep_min = 60;
 
-// Directorio del script = directorio de exportación y ubicación del script Python
-export_dir = cwd();
-py_script  = export_dir + '/shade_postprocess.py';
+// Directorio del script y carpeta de resultados
+export_dir  = cwd();
+results_dir = export_dir + '/Results';
+mkdir(results_dir);
+py_script   = export_dir + '/shade_postprocess.py';
 outln('Directorio de trabajo: ' + export_dir);
+outln('Carpeta de resultados: ' + results_dir);
 
 // ── CONVERSIÓN A SAM ─────────────────────────────────────
 PI = 3.14159265;
@@ -173,14 +176,14 @@ else
         }
 
         diff_file = '';
-        ts_file   = export_dir + '/shade_timeseries_az' + azimut + '_inc' + inclinacion + '.csv';
+        ts_file   = results_dir + '/shade_timeseries_az' + azimut + '_inc' + inclinacion + '.csv';
         ok = csvwrite(ts_file, csv_ts);
         if (ok) { outln('Serie temporal exportada: ' + ts_file); }
         else    { outln('ERROR: no se pudo escribir ' + ts_file); }
 
         // ── POST-PROCESO PYTHON ───────────────────────────
         outln('');
-        py_cmd = 'python3 "' + py_script + '" --ts "' + ts_file + '" --out "' + export_dir + '" --width ' + panel_width + ' --length ' + panel_length;
+        py_cmd = 'python3 "' + py_script + '" --ts "' + ts_file + '" --out "' + results_dir + '" --width ' + panel_width + ' --length ' + panel_length;
 
         // Escribir comando en /tmp (sin espacios) y ejecutarlo con system()
         sh_file = '/tmp/sam_shade_post.sh';
@@ -211,6 +214,6 @@ else
         }
 
         outln('');
-        outln('Completado. Archivos guardados en: ' + export_dir);
+        outln('Completado. Archivos guardados en: ' + results_dir);
     }
 }
