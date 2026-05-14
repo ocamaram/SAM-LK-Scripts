@@ -132,6 +132,7 @@ def plot_seasonal_curves(seas_avg, groups, out_path):
         ax.set_xlim(0, 23)
         ax.set_ylim(0, 100)
         ax.set_xticks(range(0, 24, 3))
+        ax.set_xticklabels([f'{h:02d}:00' for h in range(0, 24, 3)])
         ax.set_xlabel('Hora del día')
         ax.set_ylabel('Sombra (%)')
         ax.grid(True, alpha=0.25)

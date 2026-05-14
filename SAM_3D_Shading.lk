@@ -209,11 +209,38 @@ else
             else    { outln('ERROR: no se pudo escribir ' + diff_file); }
         }
 
-        // ── INSTRUCCIONES POST-PROCESO ────────────────────
+        // ── POST-PROCESO PYTHON ───────────────────────────
         outln('');
-        outln('Para generar estadísticas y gráficos, ejecuta en Terminal:');
         diff_arg = (diff_file != '') ? '"' + diff_file + '"' : '""';
-        outln('  python3 "' + py_script + '" --ts "' + ts_file + '" --diff ' + diff_arg + ' --out "' + export_dir + '" --width ' + panel_width + ' --length ' + panel_length);
+        py_cmd = 'python3 "' + py_script + '" --ts "' + ts_file + '" --diff ' + diff_arg + ' --out "' + export_dir + '" --width ' + panel_width + ' --length ' + panel_length;
+
+        // Escribir comando en /tmp (sin espacios) y ejecutarlo con system()
+        sh_file = '/tmp/sam_shade_post.sh';
+        fh = open(sh_file, 'w');
+        if (fh >= 0)
+        {
+            write_line(fh, '#!/bin/bash');
+            write_line(fh, 'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:$PATH"');
+            write_line(fh, py_cmd);
+            close(fh);
+
+            outln('Ejecutando post-proceso Python...');
+            ret = system('bash ' + sh_file);
+            if (ret == 0)
+            {
+                outln('Post-proceso completado. Archivos generados en: ' + export_dir);
+            }
+            else
+            {
+                outln('AVISO: python3 retornó código ' + ret + '. Ejecuta manualmente:');
+                outln('  ' + py_cmd);
+            }
+        }
+        else
+        {
+            outln('No se pudo escribir script temporal. Ejecuta manualmente:');
+            outln('  ' + py_cmd);
+        }
 
         outln('');
         outln('Completado. Archivos guardados en: ' + export_dir);
