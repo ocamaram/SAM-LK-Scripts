@@ -24,8 +24,7 @@ Genera una cuadrícula de superficies activas en el **3D Shade Calculator** de S
 - Asigna automáticamente cada superficie a su subarray y string correspondientes.
 - **Preserva la geometría de obstáculos existente** (edificios, árboles, cajas…) — solo elimina las superficies activas previas.
 - Ejecuta el análisis de sombra directa en series temporales (`direct_shade`) con el paso temporal deseado.
-- Ejecuta el análisis de sombra difusa (`diffuse_shade`).
-- Exporta dos archivos CSV a la carpeta elegida por el usuario.
+- Exporta los resultados a CSV y **lanza automáticamente** `shade_postprocess.py` al finalizar.
 
 #### Parámetros
 
@@ -55,7 +54,6 @@ Genera una cuadrícula de superficies activas en el **3D Shade Calculator** de S
 | Archivo | Contenido |
 |---|---|
 | `shade_timeseries_az<A>_inc<I>.csv` | 8 760 filas × n_grupos columnas con el factor de sombra directa horario (0–1) por subarray+string |
-| `shade_diffuse_az<A>_inc<I>.csv` | Una fila por grupo con el porcentaje de sombra difusa (%) |
 | `summary_statistics.csv` | Resumen estadístico por grupo (generado por `shade_postprocess.py`) |
 | `seasonal_hourly_curves.png` | Curvas horarias promedio de sombra por estación |
 | `heatmap_panel_geometry.png` | Heatmap estacional y anual sobre la geometría de paneles |
@@ -70,18 +68,21 @@ Script Python que consume los CSVs generados por el LK y produce visualizaciones
 
 ```bash
 python3 shade_postprocess.py \
-  --ts  shade_timeseries_az180_inc30.csv \
-  --diff shade_diffuse_az180_inc30.csv \
-  --out  ./resultados
+  --ts     shade_timeseries_az180_inc30.csv \
+  --out    ./resultados \
+  --width  1.0 \
+  --length 2.0
 ```
+
+> El script se ejecuta automáticamente al final de `SAM_3D_Shading.lk`. También puede lanzarse manualmente con el comando anterior.
 
 #### Salidas
 
 | Archivo | Descripción |
 |---|---|
 | `summary_statistics.csv` | Media, mediana, P90, máximo y horas con sombra >10 % y >50 % por grupo |
-| `seasonal_hourly_curves.png` | 4 subplots (Invierno/Primavera/Verano/Otoño): sombra media horaria por grupo + media del array |
-| `heatmap_panel_geometry.png` | Grid Subarray × String con valor de sombra (%) por estación y anual |
+| `seasonal_hourly_curves.png` | 4 subplots (Invierno/Primavera/Verano/Otoño): sombra media horaria por grupo + media del array; eje X en formato HH:MM |
+| `heatmap_panel_geometry.png` | Grid Subarray × String con valor de sombra (%) por estación y anual; proporciones reales del panel |
 
 ---
 
