@@ -47,16 +47,18 @@ Genera una cuadrícula de superficies activas en el **3D Shade Calculator** de S
 2. Configura la **ubicación** en la pestaña *Location* (necesaria para el cálculo solar).
 3. Añade opcionalmente los **obstáculos** de sombra (edificios, árboles…) en la pestaña *3D Scene*.
 4. Abre la pestaña *Scripting*, carga `SAM_3D_Shading.lk` y ajusta los parámetros de la sección `PARÁMETROS`.
-5. Ejecuta el script. Se abrirá un diálogo para elegir la carpeta de exportación.
+5. Ejecuta el script. Los resultados se guardan automáticamente en la subcarpeta `Results/` del directorio donde está el `.lk`.
 
 #### Archivos de salida
 
+Todos los archivos se guardan en `Results/` (subcarpeta creada automáticamente junto al script).
+
 | Archivo | Contenido |
 |---|---|
-| `shade_timeseries_az<A>_inc<I>.csv` | 8 760 filas × n_grupos columnas con el factor de sombra directa horario (0–1) por subarray+string |
-| `summary_statistics.csv` | Resumen estadístico por grupo (generado por `shade_postprocess.py`) |
-| `seasonal_hourly_curves.png` | Curvas horarias promedio de sombra por estación |
-| `heatmap_panel_geometry.png` | Heatmap estacional y anual sobre la geometría de paneles |
+| `Results/shade_timeseries_az<A>_inc<I>.csv` | 8 760 filas × n_grupos columnas con el factor de sombra directa horario (0–1) por subarray+string |
+| `Results/summary_statistics.csv` | Resumen estadístico por grupo (generado por `shade_postprocess.py`) |
+| `Results/seasonal_hourly_curves.png` | Curvas horarias promedio de sombra por estación |
+| `Results/heatmap_panel_geometry.png` | Heatmap estacional y anual sobre la geometría de paneles |
 
 El nombre de cada columna sigue el formato `SA<subarray>_ST<string>` (ej. `SA1_ST3`).
 
@@ -68,8 +70,8 @@ Script Python que consume los CSVs generados por el LK y produce visualizaciones
 
 ```bash
 python3 shade_postprocess.py \
-  --ts     shade_timeseries_az180_inc30.csv \
-  --out    ./resultados \
+  --ts     Results/shade_timeseries_az180_inc30.csv \
+  --out    Results/ \
   --width  1.0 \
   --length 2.0
 ```
