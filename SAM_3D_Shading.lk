@@ -6,11 +6,13 @@ x0 = 0.0;
 y0 = 0.0;
 z0 = 0.0;
 
-spacing_x = 1.0;   // separación entre filas
-spacing_y = 1.0;   // separación entre columnas
+panel_width  = 1.0;   // ancho del panel (m)  → dirección columnas (strings)
+panel_length = 2.0;   // largo del panel (m)  → dirección filas (subarrays)
 
-panel_width  = 1.0;   // ancho del panel (m)
-panel_length = 2.0;   // largo del panel (m)
+// Separación entre orígenes de paneles. Por defecto = dimensión del panel (sin hueco).
+// Aumenta para añadir espacio entre paneles.
+spacing_x = panel_length;   // separación entre filas   (debe ser >= panel_length)
+spacing_y = panel_width;    // separación entre columnas (debe ser >= panel_width)
 
 // azimut: orientacion solar de la superficie (0=N, 90=E, 180=S, 270=O)
 // inclinacion: 0=horizontal (suelo), 90=vertical (fachada)
@@ -58,6 +60,9 @@ max_strings   = 8;
 max_surfaces  = max_subarrays * max_strings;
 
 // ── VALIDACIÓN ───────────────────────────────────────────
+if (spacing_x < panel_length) { outln('AVISO: spacing_x (' + spacing_x + ') < panel_length (' + panel_length + ') → los paneles se solaparán en filas.'); }
+if (spacing_y < panel_width)  { outln('AVISO: spacing_y (' + spacing_y + ') < panel_width ('  + panel_width  + ') → los paneles se solaparán en columnas.'); }
+
 n_total = rows * cols;
 
 if (n_total > max_surfaces)
