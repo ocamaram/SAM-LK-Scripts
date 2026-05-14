@@ -9,6 +9,9 @@ z0 = 0.0;
 spacing_x = 1.0;   // separación entre filas
 spacing_y = 1.0;   // separación entre columnas
 
+panel_width  = 1.0;   // ancho del panel (m)
+panel_length = 2.0;   // largo del panel (m)
+
 // azimut: orientacion solar de la superficie (0=N, 90=E, 180=S, 270=O)
 // inclinacion: 0=horizontal (suelo), 90=vertical (fachada)
 azimut     = 180;
@@ -104,8 +107,8 @@ else
             p.X        = px;
             p.Y        = py;
             p.Z        = pz;
-            p.Width    = 1.0;
-            p.Length   = 1.0;
+            p.Width    = panel_width;
+            p.Length   = panel_length;
             p.Azimuth  = sam_az;
             p.Tilt     = sam_tilt;
             p.Shape    = 'rectangle';
@@ -200,7 +203,7 @@ else
         outln('');
         outln('Para generar estadísticas y gráficos, ejecuta en Terminal:');
         diff_arg = (diff_file != '') ? '"' + diff_file + '"' : '""';
-        outln('  python3 "' + py_script + '" --ts "' + ts_file + '" --diff ' + diff_arg + ' --out "' + export_dir + '"');
+        outln('  python3 "' + py_script + '" --ts "' + ts_file + '" --diff ' + diff_arg + ' --out "' + export_dir + '" --width ' + panel_width + ' --length ' + panel_length);
 
         outln('');
         outln('Completado. Archivos guardados en: ' + export_dir);

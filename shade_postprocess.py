@@ -187,15 +187,24 @@ def build_grids(seas_avg, ts, groups):
     return grids, n_sa, n_st
 
 
-def plot_heatmaps(grids, n_sa, n_st, out_path):
-    labels  = list(grids.keys())          # 4 estaciones + Anual
-    n_plots = len(labels)                  # 5
+def plot_heatmaps(grids, n_sa, n_st, panel_w, panel_l, out_path):
+    labels  = list(grids.keys())   # 4 estaciones + Anual
+    n_plots = len(labels)          # 5
 
-    # Layout 2×3 (última celda vacía)
+    # Ratio físico de cada celda: alto/ancho = panel_l / panel_w
+    cell_ratio = panel_l / panel_w
+
+    # Tamaño de cada subplot proporcional a la geometría real del array
+    cell_px   = 0.6                          # ancho de celda en pulgadas
+    ax_w = n_st * cell_px
+    ax_h = n_sa * cell_px * cell_ratio
+
     n_cols, n_rows = 3, 2
-    fig, axes = plt.subplots(n_rows, n_cols,
-                              figsize=(5 * n_cols, 4.5 * n_rows),
-                              gridspec_kw={'wspace': 0.45, 'hspace': 0.55})
+    fig_w = n_cols * (ax_w + 1.0) + 0.5     # margen para colorbar
+    fig_h = n_rows * (ax_h + 1.0) + 0.8     # margen para título
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h),
+                              gridspec_kw={'wspace': 0.5, 'hspace': 0.6})
     axes_flat = axes.flatten()
 
     all_vals = np.concatenate([g[~np.isnan(g)] for g in grids.values()])
@@ -205,42 +214,37 @@ def plot_heatmaps(grids, n_sa, n_st, out_path):
         'shade', ['#fffde7', '#ffcc02', '#e65100'], N=256
     )
 
+    # extent: [xmin, xmax, ymax, ymin] en unidades físicas (metros)
+    extent = [-0.5 * panel_w, (n_st - 0.5) * panel_w,
+               (n_sa - 0.5) * panel_l, -0.5 * panel_l]
+
     for idx, label in enumerate(labels):
         ax = axes_flat[idx]
         grid = grids[label]
 
         im = ax.imshow(grid, cmap=cmap, vmin=vmin, vmax=vmax,
-                       aspect='auto', origin='upper')
-
-        # Anotar cada celda
-        for r in range(n_sa):
-            for c in range(n_st):
-                val = grid[r, c]
-                if not np.isnan(val):
-                    txt_color = 'white' if val > (vmin + 0.65 * (vmax - vmin)) else 'black'
-                    ax.text(c, r, f'{val:.1f}',
-                            ha='center', va='center',
-                            fontsize=7.5, color=txt_color, fontweight='bold')
+                       origin='upper', extent=extent, aspect='equal')
 
         season_color = SEASON_COLORS.get(label, '#333333')
-        ax.set_title(label, fontsize=11, fontweight='bold', color=season_color)
-        ax.set_xlabel('String', fontsize=9)
-        ax.set_ylabel('Subarray', fontsize=9)
-        ax.set_xticks(range(n_st))
-        ax.set_xticklabels([f'ST{i+1}' for i in range(n_st)], fontsize=7)
-        ax.set_yticks(range(n_sa))
-        ax.set_yticklabels([f'SA{i+1}' for i in range(n_sa)], fontsize=7)
+        ax.set_title(label, fontsize=10, fontweight='bold', color=season_color)
+        ax.set_xlabel('String', fontsize=8)
+        ax.set_ylabel('Subarray', fontsize=8)
+
+        # Ticks centrados en cada celda
+        ax.set_xticks([c * panel_w for c in range(n_st)])
+        ax.set_xticklabels([f'ST{c+1}' for c in range(n_st)], fontsize=6)
+        ax.set_yticks([r * panel_l for r in range(n_sa)])
+        ax.set_yticklabels([f'SA{r+1}' for r in range(n_sa)], fontsize=6)
 
         cbar = plt.colorbar(im, ax=ax, shrink=0.85, pad=0.03)
-        cbar.set_label('Sombra (%)', fontsize=8)
-        cbar.ax.tick_params(labelsize=7)
+        cbar.set_label('Sombra (%)', fontsize=7)
+        cbar.ax.tick_params(labelsize=6)
 
-    # Ocultar celda sobrante
     for idx in range(n_plots, n_rows * n_cols):
         axes_flat[idx].set_visible(False)
 
-    fig.suptitle('Heatmap de sombra sobre geometría de paneles\n(Subarray × String)',
-                 fontsize=13, fontweight='bold')
+    fig.suptitle('Heatmap de sombra — geometría de paneles',
+                 fontsize=12, fontweight='bold')
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f'  Heatmap → {out_path}')
@@ -250,9 +254,11 @@ def plot_heatmaps(grids, n_sa, n_st, out_path):
 
 def main():
     parser = argparse.ArgumentParser(description='Post-proceso sombras SAM')
-    parser.add_argument('--ts',   required=True, help='CSV series temporales')
-    parser.add_argument('--diff', required=True, help='CSV sombra difusa')
-    parser.add_argument('--out',  required=True, help='Carpeta de salida')
+    parser.add_argument('--ts',     required=True,       help='CSV series temporales')
+    parser.add_argument('--diff',   required=True,       help='CSV sombra difusa')
+    parser.add_argument('--out',    required=True,       help='Carpeta de salida')
+    parser.add_argument('--width',  type=float, default=1.0, help='Ancho del panel (m)')
+    parser.add_argument('--length', type=float, default=1.0, help='Largo del panel (m)')
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -306,6 +312,7 @@ def main():
     if grids:
         plot_heatmaps(
             grids, n_sa, n_st,
+            args.width, args.length,
             os.path.join(args.out, 'heatmap_panel_geometry.png')
         )
 
