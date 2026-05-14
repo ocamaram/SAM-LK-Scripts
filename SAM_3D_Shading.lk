@@ -22,16 +22,10 @@ inclinacion = 30;
 // timestep en minutos para el análisis de series temporales (60 → 8760 puntos/año)
 timestep_min = 60;
 
-// Ruta completa al script Python de post-proceso
-py_script = '/Users/cammor/Visual Studio Code/SAM/shade_postprocess.py';
-
-// ── RUTA DE EXPORTACIÓN ──────────────────────────────────
-export_dir = choose_dir(homedir(), 'Carpeta de exportación de sombras');
-if (export_dir == '')
-{
-    outln('Operación cancelada.');
-    exit;
-}
+// Directorio del script = directorio de exportación y ubicación del script Python
+export_dir = cwd();
+py_script  = export_dir + '/shade_postprocess.py';
+outln('Directorio de trabajo: ' + export_dir);
 
 // ── CONVERSIÓN A SAM ─────────────────────────────────────
 PI = 3.14159265;
