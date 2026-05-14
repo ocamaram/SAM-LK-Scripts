@@ -139,11 +139,9 @@ else
     outln('Ubicación: lat=' + loc.lat + '  lon=' + loc.lon + '  tz=' + loc.tz);
 
     // ── ANÁLISIS TIME SERIES (sombra directa/beam) ────────
-    // Un único switch_to(2) con sleep generoso cubre tanto primera como sucesivas ejecuciones
     outln('Calculando series temporales de sombra directa...');
-    switch_to(2);
     uiyield();
-    millisleep(2000);
+    millisleep(500);
 
     ts = direct_shade(timestep_min);
 
