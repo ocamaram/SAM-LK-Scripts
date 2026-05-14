@@ -17,8 +17,6 @@ inclinacion = 30;
 // timestep en minutos para el análisis de series temporales (60 → 8760 puntos/año)
 timestep_min = 60;
 
-// Ruta al script Python de post-proceso (dejar vacío para omitir)
-py_script = cwd() + '/shade_postprocess.py';
 
 // ── RUTA DE EXPORTACIÓN ──────────────────────────────────
 export_dir = choose_dir(homedir(), 'Carpeta de exportación de sombras');
@@ -158,7 +156,8 @@ else
             }
         }
 
-        ts_file = export_dir + '/shade_timeseries_az' + azimut + '_inc' + inclinacion + '.csv';
+        diff_file = '';
+        ts_file   = export_dir + '/shade_timeseries_az' + azimut + '_inc' + inclinacion + '.csv';
         ok = csvwrite(ts_file, csv_ts);
         if (ok) { outln('Serie temporal exportada: ' + ts_file); }
         else    { outln('ERROR: no se pudo escribir ' + ts_file); }
@@ -184,15 +183,16 @@ else
             else    { outln('ERROR: no se pudo escribir ' + diff_file); }
         }
 
-        // ── POST-PROCESO PYTHON ───────────────────────────
-        if (py_script != '' && diff_file != '')
+        // ── INSTRUCCIONES POST-PROCESO ────────────────────
+        outln('');
+        outln('Para generar estadísticas y gráficos, ejecuta en Terminal:');
+        if (diff_file != '')
         {
-            outln('');
-            outln('Lanzando post-proceso Python...');
-            cmd = 'python3 "' + py_script + '" --ts "' + ts_file + '" --diff "' + diff_file + '" --out "' + export_dir + '"';
-            exit_code = system(cmd);
-            if (exit_code == 0) { outln('Post-proceso completado correctamente.'); }
-            else                { outln('Error en el post-proceso Python (código ' + exit_code + ').'); }
+            outln('  python3 shade_postprocess.py --ts "' + ts_file + '" --diff "' + diff_file + '" --out "' + export_dir + '"');
+        }
+        else
+        {
+            outln('  python3 shade_postprocess.py --ts "' + ts_file + '" --diff "" --out "' + export_dir + '"');
         }
 
         browse(export_dir);
