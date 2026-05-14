@@ -196,68 +196,83 @@ def plot_heatmaps(grids, n_sa, n_st, panel_w, panel_l, out_path):
     all_vals = np.concatenate([g[~np.isnan(g)] for g in grids.values()])
     vmin, vmax = np.percentile(all_vals, 2), np.percentile(all_vals, 98)
 
-    cmap  = LinearSegmentedColormap.from_list(
+    cmap = LinearSegmentedColormap.from_list(
         'shade', ['#fffde7', '#ffcc02', '#e65100'], N=256
     )
-    norm  = Normalize(vmin=vmin, vmax=vmax)
-    sm    = ScalarMappable(cmap=cmap, norm=norm)
+    norm = Normalize(vmin=vmin, vmax=vmax)
+    sm   = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
 
-    # Tamaño de figura proporcional a la geometría real del array
-    cell_in = 0.55                              # pulgadas por metro de panel
-    ax_w = n_st * panel_w * cell_in
-    ax_h = n_sa * panel_l * cell_in
+    # ── Dimensiones físicas exactas por subplot ───────────────
+    cell_in  = 0.55           # pulgadas por metro de panel
+    ax_w     = n_st * panel_w * cell_in   # ancho del axes en pulgadas
+    ax_h     = n_sa * panel_l * cell_in   # alto del axes en pulgadas
 
     n_cols, n_rows = 3, 2
-    fig_w = n_cols * (ax_w + 1.1) + 0.4
-    fig_h = n_rows * (ax_h + 0.9) + 0.6
+    cbar_w   = 0.25           # ancho colorbar en pulgadas
+    col_gap  = 0.80           # espacio horizontal entre subplots
+    row_gap  = 0.70           # espacio vertical entre subplots
+    pad_l    = 0.55           # margen izquierdo
+    pad_r    = 0.15           # margen derecho
+    pad_top  = 0.55           # margen superior (título)
+    pad_bot  = 0.40           # margen inferior
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_w, fig_h),
-                              gridspec_kw={'wspace': 0.5, 'hspace': 0.7})
-    axes_flat = axes.flatten()
+    slot_w   = ax_w + cbar_w + 0.15   # ancho de cada slot (axes + colorbar)
+    fig_w    = pad_l + n_cols * slot_w + (n_cols - 1) * col_gap + pad_r
+    fig_h    = pad_top + n_rows * ax_h + (n_rows - 1) * row_gap + pad_bot
+
+    fig = plt.figure(figsize=(fig_w, fig_h))
 
     for idx, label in enumerate(labels):
-        ax = axes_flat[idx]
+        row = idx // n_cols
+        col = idx % n_cols
+
+        # Posición del axes en coordenadas normalizadas de figura
+        ax_left   = (pad_l + col * (slot_w + col_gap)) / fig_w
+        ax_bottom = (pad_bot + (n_rows - 1 - row) * (ax_h + row_gap)) / fig_h
+        ax_rect   = [ax_left, ax_bottom, ax_w / fig_w, ax_h / fig_h]
+
+        ax = fig.add_axes(ax_rect)
         grid = grids[label]
 
-        # Dibujar cada panel como un Rectangle explícito
         for sa in range(n_sa):
             for st in range(n_st):
                 val = grid[sa, st]
                 if np.isnan(val):
                     continue
-                color = cmap(norm(val))
                 rect = Rectangle(
                     xy=(st * panel_w, sa * panel_l),
                     width=panel_w, height=panel_l,
-                    facecolor=color, edgecolor='white', linewidth=0.5
+                    facecolor=cmap(norm(val)),
+                    edgecolor='white', linewidth=0.5
                 )
                 ax.add_patch(rect)
 
         ax.set_xlim(0, n_st * panel_w)
-        ax.set_ylim(n_sa * panel_l, 0)      # Y invertido: SA1 arriba
-        ax.set_aspect('equal')
+        ax.set_ylim(n_sa * panel_l, 0)   # Y invertido: SA1 arriba
+        # Sin aspect='equal': las proporciones correctas vienen del figsize
 
         season_color = SEASON_COLORS.get(label, '#333333')
-        ax.set_title(label, fontsize=10, fontweight='bold', color=season_color)
-        ax.set_xlabel('String', fontsize=8)
-        ax.set_ylabel('Subarray', fontsize=8)
+        ax.set_title(label, fontsize=10, fontweight='bold', color=season_color, pad=4)
+        ax.set_xlabel('String', fontsize=8, labelpad=3)
+        ax.set_ylabel('Subarray', fontsize=8, labelpad=3)
 
-        # Ticks centrados en cada celda
         ax.set_xticks([(st + 0.5) * panel_w for st in range(n_st)])
         ax.set_xticklabels([f'ST{st+1}' for st in range(n_st)], fontsize=6)
         ax.set_yticks([(sa + 0.5) * panel_l for sa in range(n_sa)])
         ax.set_yticklabels([f'SA{sa+1}' for sa in range(n_sa)], fontsize=6)
 
-        cbar = plt.colorbar(sm, ax=ax, shrink=0.85, pad=0.03)
+        # Colorbar en axes propio, adyacente al subplot
+        cbar_left   = ax_left + ax_w / fig_w + 0.01
+        cbar_rect   = [cbar_left, ax_bottom, cbar_w / fig_w, ax_h / fig_h]
+        cax = fig.add_axes(cbar_rect)
+        cbar = fig.colorbar(sm, cax=cax)
         cbar.set_label('Sombra (%)', fontsize=7)
         cbar.ax.tick_params(labelsize=6)
 
-    for idx in range(n_plots, n_rows * n_cols):
-        axes_flat[idx].set_visible(False)
+    fig.text(0.5, 1 - pad_top / fig_h / 2, 'Heatmap de sombra — geometría de paneles',
+             ha='center', va='top', fontsize=12, fontweight='bold')
 
-    fig.suptitle('Heatmap de sombra — geometría de paneles',
-                 fontsize=12, fontweight='bold')
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f'  Heatmap → {out_path}')
