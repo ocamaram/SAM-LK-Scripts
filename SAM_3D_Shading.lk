@@ -25,7 +25,6 @@ timestep_min = 60;
 // Directorio del script y carpeta de resultados
 export_dir  = cwd();
 results_dir = export_dir + '/Results';
-mkdir(results_dir);
 py_script   = export_dir + '/shade_postprocess.py';
 outln('Directorio de trabajo: ' + export_dir);
 outln('Carpeta de resultados: ' + results_dir);
@@ -192,6 +191,7 @@ else
         {
             write_line(fh, '#!/bin/bash');
             write_line(fh, 'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:$PATH"');
+            write_line(fh, 'mkdir -p "' + results_dir + '"');
             write_line(fh, py_cmd);
             close(fh);
 
