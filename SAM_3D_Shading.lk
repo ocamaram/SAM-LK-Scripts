@@ -1,34 +1,30 @@
-// ── PARÁMETROS ──────────────────────────────────────────
-rows = 4;
+// ── PARÁMETROS DEL ARRAY ─────────────────────────────────
+rows = 10;
 cols = 8;
+
+irradiance_ref = 1000.0;   // Irradiancia de referencia (W/m²) para heatmaps de irradiancia
 
 x0 = 0.0;
 y0 = 0.0;
 z0 = 0.0;
 
-panel_width  = 1.0;   // ancho del panel (m)  → dirección columnas (strings)
-panel_length = 2.0;   // largo del panel (m)  → dirección filas (subarrays)
+panel_length = 2.0;   // largo del panel (m)  → dirección filas (rows)
+panel_width  = 1.0;   // ancho del panel (m)  → dirección columnas (cols)
 
-// Separación entre orígenes de paneles. Por defecto = dimensión del panel (sin hueco).
-// Aumenta para añadir espacio entre paneles.
-spacing_x = panel_length;   // separación entre filas   (debe ser >= panel_length)
-spacing_y = panel_width;    // separación entre columnas (debe ser >= panel_width)
+spacing_x = panel_length;   // separación entre filas   (>= panel_length)
+spacing_y = panel_width;    // separación entre columnas (>= panel_width)
 
-// azimut: orientacion solar de la superficie (0=N, 90=E, 180=S, 270=O)
-// inclinacion: 0=horizontal (suelo), 90=vertical (fachada)
 azimut     = 180;
 inclinacion = 30;
 
-// timestep en minutos para el análisis de series temporales (60 → 8760 puntos/año)
 timestep_min = 60;
 
-// Directorio del script y carpeta de resultados
-export_dir  = cwd();
-results_dir = export_dir + '/Results';
-py_script   = export_dir + '/shade_postprocess.py';
-py_exec     = export_dir + '/.venv/bin/python3';
-outln('Directorio de trabajo: ' + export_dir);
-outln('Carpeta de resultados: ' + results_dir);
+// ── RUTAS ────────────────────────────────────────────────
+export_dir     = cwd();
+results_dir    = export_dir + '/Results';
+obstacles_file = '/tmp/sam_obstacles.s3d';   // sin espacios en el path → save_scene/load_scene funcionan
+py_script      = export_dir + '/shade_postprocess.py';
+py_exec        = export_dir + '/.venv/bin/python3';
 
 // ── CONVERSIÓN A SAM ─────────────────────────────────────
 PI = 3.14159265;
@@ -51,170 +47,202 @@ sam_tilt = acos(nz) * 180 / PI;
 sam_az   = atan2(nx, ny) * 180 / PI;
 if (sam_az < 0) { sam_az = sam_az + 360; }
 
-// ── LÍMITES ──────────────────────────────────────────────
+// ── CÁLCULO DE BATCHES ───────────────────────────────────
 max_subarrays = 4;
 max_strings   = 8;
-max_surfaces  = max_subarrays * max_strings;
+max_surfaces  = max_subarrays * max_strings;   // 32 por batch
 
-// ── VALIDACIÓN ───────────────────────────────────────────
-if (spacing_x < panel_length) { outln('AVISO: spacing_x (' + spacing_x + ') < panel_length (' + panel_length + ') → los paneles se solaparán en filas.'); }
-if (spacing_y < panel_width)  { outln('AVISO: spacing_y (' + spacing_y + ') < panel_width ('  + panel_width  + ') → los paneles se solaparán en columnas.'); }
+n_total   = rows * cols;
+n_batches = to_int((n_total + max_surfaces - 1) / max_surfaces);
 
-n_total = rows * cols;
+// ── VALIDACIONES ─────────────────────────────────────────
+if (spacing_x < panel_length) { outln('AVISO: spacing_x < panel_length → paneles solapados en filas.'); }
+if (spacing_y < panel_width)  { outln('AVISO: spacing_y < panel_width  → paneles solapados en columnas.'); }
 
-if (n_total > max_surfaces)
+loc = location();
+if (loc.lat == 0 && loc.lon == 0)
 {
-    outln('ERROR: ' + n_total + ' superficies solicitadas, máximo permitido = ' + max_surfaces);
-    outln('Reduce rows (' + rows + ') x cols (' + cols + ') a un máximo de ' + max_surfaces);
+    outln('ERROR: Ubicación no configurada. Ve a la pestaña Location.');
+    exit;
+}
+
+outln('Array: ' + rows + 'x' + cols + ' = ' + n_total + ' paneles   |   ' + n_batches + ' batch(es)');
+outln('Ubicación: lat=' + loc.lat + '  lon=' + loc.lon + '  tz=' + loc.tz);
+outln('SAM Tilt=' + sam_tilt + '  SAM Az=' + sam_az);
+outln('');
+
+// ── GUARDAR OBSTÁCULOS ───────────────────────────────────
+// El archivo de obstáculos debe contener SOLO obstáculos (sin superficies activas)
+// para que load_scene() en el loop no requiera ningún delete() posterior.
+// Eso solo es posible cuando la escena está limpia al ejecutar el script.
+//
+// PROTOCOLO si se modifican obstáculos:
+//   1. Pulsar "New" en SAM  (limpia la escena)
+//   2. Añadir los obstáculos en su nueva posición
+//   3. Ejecutar este script
+//
+// Ejecuciones normales (sin cambiar obstáculos): ejecutar directamente.
+
+// Crear Results/ si no existe
+sh_mkdir = '/tmp/sam_mkdir.sh';
+fh_mkdir = open(sh_mkdir, 'w');
+write_line(fh_mkdir, '#!/bin/bash');
+write_line(fh_mkdir, 'mkdir -p "' + results_dir + '"');
+close(fh_mkdir);
+system('bash ' + sh_mkdir);
+
+existing = objects();
+n_active = 0;
+for (i = 0; i < #existing; i++)
+{
+    props = property(existing[i]);
+    keys  = @props;
+    for (j = 0; j < #keys; j++)
+    {
+        if (keys[j] == 'Subarray') { n_active = n_active + 1; break; }
+    }
+}
+
+if (n_active == 0)
+{
+    save_scene(obstacles_file);
+    outln('Obstáculos guardados: ' + obstacles_file);
 }
 else
 {
-    // ── ELIMINAR SOLO SUPERFICIES ACTIVAS PREVIAS ────────
-    // Los obstáculos (Tree, Box, etc.) no tienen la propiedad 'Subarray' → se conservan
-    existing = objects();
-    for (i = 0; i < #existing; i++)
+    fh_test = open(obstacles_file, 'r');
+    if (fh_test >= 0)
     {
-        props = property(existing[i]);
-        keys  = @props;
-        for (j = 0; j < #keys; j++)
-        {
-            if (keys[j] == 'Subarray')
-            {
-                delete(existing[i]);
-                break;
-            }
-        }
+        close(fh_test);
+        outln('Usando obstáculos guardados: ' + obstacles_file);
+        outln('(Para actualizar obstáculos: "New" → añadir obstáculos → ejecutar.)');
     }
-    uiyield();
-    millisleep(300);
-
-    // ── CREAR SUPERFICIES ACTIVAS ─────────────────────────
-    idx = 0;
-
-    for (r = 0; r < rows; r++)
+    else
     {
-        for (c = 0; c < cols; c++)
-        {
-            subarray = to_int(idx / max_strings) + 1;
-            string   = idx - to_int(idx / max_strings) * max_strings + 1;
-
-            px = x0 + c * spacing_y * dir_hx + r * spacing_x * dir_sx;
-            py = y0 + c * spacing_y * dir_hy + r * spacing_x * dir_sy;
-            pz = z0 +                          r * spacing_x * dir_sz;
-
-            p = {};
-            p.Name     = 'AS_az' + azimut + '_inc' + inclinacion + '_sub' + subarray + '_str' + string;
-            p.Subarray = subarray - 1;
-            p.String   = string - 1;
-            p.Group    = 'SA' + subarray + '_ST' + string;
-            p.X        = px;
-            p.Y        = py;
-            p.Z        = pz;
-            p.Width    = panel_width;
-            p.Length   = panel_length;
-            p.Azimuth  = sam_az;
-            p.Tilt     = sam_tilt;
-            p.Shape    = 'rectangle';
-
-            obj = create('Active surface');
-            property(obj, p);
-
-            outln('Creada: ' + p.Name + '  X=' + px + '  Y=' + py + '  Z=' + pz);
-
-            idx = idx + 1;
-        }
-    }
-    uiyield();
-
-    outln('--- Azimut=' + azimut + '  Inclinacion=' + inclinacion);
-    outln('--- SAM Tilt=' + sam_tilt + '  SAM Az=' + sam_az);
-    outln('--- Total: ' + n_total + ' de ' + max_surfaces);
-    outln('');
-
-    // ── VALIDAR UBICACIÓN ────────────────────────────────
-    loc = location();
-    if (loc.lat == 0 && loc.lon == 0)
-    {
-        outln('ERROR: Ubicación no configurada.');
-        outln('Ve a la pestaña Location y configura latitud, longitud y zona horaria antes de ejecutar.');
+        outln('ERROR: no existe archivo de obstáculos.');
+        outln('Pulsa "New" en SAM, añade los obstáculos y ejecuta el script.');
         exit;
     }
-    outln('Ubicación: lat=' + loc.lat + '  lon=' + loc.lon + '  tz=' + loc.tz);
+}
+outln('');
 
-    // ── ANÁLISIS TIME SERIES (sombra directa/beam) ────────
-    outln('Calculando series temporales de sombra directa...');
+// ── LOOP DE BATCHES ───────────────────────────────────────
+// clear_scene() es siempre seguro, incluso con superficies que hayan
+// pasado por direct_shade(). No se usa delete() en ningún momento.
+batch_files_arg = '';
+
+for (b = 0; b < n_batches; b++)
+{
+    batch_start = b * max_surfaces;
+    batch_end   = batch_start + max_surfaces;
+    if (batch_end > n_total) { batch_end = n_total; }
+    batch_count = batch_end - batch_start;
+
+    outln('=== Batch ' + (b+1) + '/' + n_batches + '  paneles ' + batch_start + '..' + (batch_end-1) + ' (' + batch_count + ' unidades) ===');
+
+    // Resetear escena y restaurar obstáculos (el archivo solo contiene obstáculos)
+    clear_scene();
+    load_scene(obstacles_file);
     uiyield();
+    millisleep(500);
+
+    // ── CREAR SUPERFICIES ACTIVAS ─────────────────────────
+    for (local_idx = 0; local_idx < batch_count; local_idx++)
+    {
+        panel_idx  = batch_start + local_idx;
+        global_row = to_int(panel_idx / cols);
+        global_col = panel_idx - to_int(panel_idx / cols) * cols;
+
+        local_sub = to_int(local_idx / max_strings);
+        local_str = local_idx - local_sub * max_strings;
+
+        px = x0 + global_col * spacing_y * dir_hx + global_row * spacing_x * dir_sx;
+        py = y0 + global_col * spacing_y * dir_hy + global_row * spacing_x * dir_sy;
+        pz = z0 +                                   global_row * spacing_x * dir_sz;
+
+        p = {};
+        p.Name     = 'AS_r' + global_row + '_c' + global_col;
+        p.Subarray = local_sub;
+        p.String   = local_str;
+        p.Group    = 'SA' + (global_row + 1) + '_ST' + (global_col + 1);
+        p.X        = px;
+        p.Y        = py;
+        p.Z        = pz;
+        p.Width    = panel_width;
+        p.Length   = panel_length;
+        p.Azimuth  = sam_az;
+        p.Tilt     = sam_tilt;
+        p.Shape    = 'rectangle';
+
+        obj = create('Active surface');
+        property(obj, p);
+    }
+    uiyield();
+
+    // ── ANÁLISIS DE SOMBRA ────────────────────────────────
+    outln('  Calculando direct_shade()...');
     millisleep(500);
 
     ts = direct_shade(timestep_min);
 
     if (ts == null)
     {
-        outln('ERROR: direct_shade() falló. Verifica que la ubicación esté configurada (pestaña Location).');
+        outln('ERROR: direct_shade() falló en batch ' + (b+1) + '. Abortando.');
+        exit;
     }
-    else
+
+    groups   = @ts;
+    n_groups = #groups;
+    n_points = #ts{groups[0]};
+    outln('  Grupos: ' + n_groups + '   Puntos: ' + n_points);
+
+    // ── EXPORTAR CSV ─────────────────────────────────────
+    batch_file = results_dir + '/shade_batch' + b + '_az' + azimut + '_inc' + inclinacion + '.csv';
+    fh = open(batch_file, 'w');
+    if (fh < 0) { outln('ERROR: no se pudo abrir ' + batch_file); exit; }
+
+    line = 'Hora';
+    for (k = 0; k < n_groups; k++) { line = line + ',' + groups[k]; }
+    write_line(fh, line);
+
+    for (h = 0; h < n_points; h++)
     {
-        groups   = @ts;
-        n_groups = #groups;
-        n_points = #ts{groups[0]};
-        outln('Grupos: ' + n_groups + '   Puntos temporales: ' + n_points);
-
-        // construir array 2D para CSV:  fila 0 = cabecera, filas 1..n_points = datos
-        csv_ts[0][0] = 'Hora';
-        for (k = 0; k < n_groups; k++)
-        {
-            csv_ts[0][k+1] = groups[k];
-        }
-
-        for (h = 0; h < n_points; h++)
-        {
-            csv_ts[h+1][0] = h + 1;
-            for (k = 0; k < n_groups; k++)
-            {
-                csv_ts[h+1][k+1] = ts{groups[k]}[h];
-            }
-        }
-
-        diff_file = '';
-        ts_file   = results_dir + '/shade_timeseries_az' + azimut + '_inc' + inclinacion + '.csv';
-        ok = csvwrite(ts_file, csv_ts);
-        if (ok) { outln('Serie temporal exportada: ' + ts_file); }
-        else    { outln('ERROR: no se pudo escribir ' + ts_file); }
-
-        // ── POST-PROCESO PYTHON ───────────────────────────
-        outln('');
-        py_cmd = '"' + py_exec + '" "' + py_script + '" --ts "' + ts_file + '" --out "' + results_dir + '" --width ' + panel_width + ' --length ' + panel_length;
-
-        // Escribir comando en /tmp (sin espacios) y ejecutarlo con system()
-        sh_file = '/tmp/sam_shade_post.sh';
-        fh = open(sh_file, 'w');
-        if (fh >= 0)
-        {
-            write_line(fh, '#!/bin/bash');
-            write_line(fh, 'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:$PATH"');
-            write_line(fh, 'mkdir -p "' + results_dir + '"');
-            write_line(fh, py_cmd);
-            close(fh);
-
-            outln('Ejecutando post-proceso Python...');
-            ret = system('bash ' + sh_file);
-            if (ret == 0)
-            {
-                outln('Post-proceso completado. Archivos generados en: ' + export_dir);
-            }
-            else
-            {
-                outln('AVISO: python3 retornó código ' + ret + '. Ejecuta manualmente:');
-                outln('  ' + py_cmd);
-            }
-        }
-        else
-        {
-            outln('No se pudo escribir script temporal. Ejecuta manualmente:');
-            outln('  ' + py_cmd);
-        }
-
-        outln('');
-        outln('Completado. Archivos guardados en: ' + results_dir);
+        line = '' + (h + 1);
+        for (k = 0; k < n_groups; k++) { line = line + ',' + ts{groups[k]}[h]; }
+        write_line(fh, line);
     }
+    close(fh);
+    outln('  CSV: ' + batch_file);
+
+    batch_files_arg = batch_files_arg + ' "' + batch_file + '"';
+
+    outln('');
 }
+
+// ── POST-PROCESO PYTHON ───────────────────────────────────
+outln('Todos los batches completados. Fusionando con Python...');
+
+py_cmd = '"' + py_exec + '" "' + py_script + '" --batches' + batch_files_arg + ' --out "' + results_dir + '" --width ' + panel_width + ' --length ' + panel_length + ' --cols ' + cols + ' --irradiance ' + irradiance_ref;
+
+sh_file = '/tmp/sam_shade_post.sh';
+fh = open(sh_file, 'w');
+if (fh >= 0)
+{
+    write_line(fh, '#!/bin/bash');
+    write_line(fh, 'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:$PATH"');
+    write_line(fh, 'mkdir -p "' + results_dir + '"');
+    write_line(fh, py_cmd);
+    close(fh);
+
+    ret = system('bash ' + sh_file);
+    if (ret == 0) { outln('Post-proceso completado. Archivos en: ' + results_dir); }
+    else          { outln('AVISO: Python retornó código ' + ret + '. Ejecuta manualmente:'); outln('  ' + py_cmd); }
+}
+else
+{
+    outln('No se pudo escribir script temporal. Ejecuta manualmente:');
+    outln('  ' + py_cmd);
+}
+
+outln('');
+outln('Completado: ' + n_total + ' paneles (' + rows + 'x' + cols + ') en ' + n_batches + ' batches.');
