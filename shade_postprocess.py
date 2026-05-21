@@ -196,13 +196,14 @@ def plot_seasonal_curves(seas_avg, groups, out_path):
         ax.plot(array_mean.index, array_mean * 100,
                 color='black', linewidth=2.2, linestyle='--')
 
-        ax.set_title(season, fontsize=12, fontweight='bold', color='black')
+        ax.set_title(season, fontsize=14, fontweight='bold', color='black')
         ax.set_xlim(0, 23)
         ax.set_ylim(0, 100)
         ax.set_xticks(range(0, 24, 3))
-        ax.set_xticklabels([f'{h:02d}:00' for h in range(0, 24, 3)])
-        ax.set_xlabel('Hora')
-        ax.set_ylabel('Sombra (%)')
+        ax.set_xticklabels([f'{h:02d}:00' for h in range(0, 24, 3)], fontsize=13)
+        ax.set_xlabel('Hora', fontsize=14)
+        ax.set_ylabel('Sombra (%)', fontsize=14)
+        ax.tick_params(axis='y', labelsize=13)
         ax.grid(True, alpha=0.25)
         ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%g%%'))
 
@@ -214,11 +215,11 @@ def plot_seasonal_curves(seas_avg, groups, out_path):
                    label='Media del array'),
     ]
     fig.legend(handles=legend_handles, loc='lower center', ncol=2,
-               fontsize=10, bbox_to_anchor=(0.5, -0.02),
+               fontsize=14, bbox_to_anchor=(0.5, -0.02),
                frameon=True, edgecolor='#cccccc')
 
     fig.suptitle('Sombra directa horaria promedio por estación',
-                 fontsize=14, fontweight='bold')
+                 fontsize=16, fontweight='bold')
     plt.tight_layout()
     plt.savefig(out_path, dpi=600, bbox_inches='tight')
     plt.close()
@@ -265,9 +266,15 @@ def build_grids(seas_avg, ts, groups):
     return grids, len(row_idx), len(col_idx), sa_labels, st_labels
 
 
-def plot_annual_heatmap(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out_path):
-    """Heatmap anual independiente, alta resolución. Misma escala que heatmap_panel_geometry."""
-    grid = grids['Anual']
+def season_slug(label):
+    """Convierte etiqueta de estación/anual a slug ASCII para nombres de archivo."""
+    replacements = str.maketrans('ñáéíóúÑÁÉÍÓÚ', 'naeiouNAEIOU')
+    return label.lower().translate(replacements)
+
+
+def plot_single_heatmap(grids, label, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out_path):
+    """Heatmap independiente para un label (estación o 'Anual'), escala común a todos los grids."""
+    grid = grids[label]
     all_vals = np.concatenate([g[~np.isnan(g)] for g in grids.values()])
     vmin, vmax = np.percentile(all_vals, 2), np.percentile(all_vals, 98)
 
@@ -281,10 +288,20 @@ def plot_annual_heatmap(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_
     cell_in  = 0.80
     ax_w     = n_st * panel_w * cell_in
     ax_h     = n_sa * panel_l * cell_in
-    cbar_w   = 0.30
-    pad_l, pad_r, pad_top, pad_bot = 0.70, 0.20, 0.65, 0.55
 
-    fig_w = pad_l + ax_w + 0.12 + cbar_w + pad_r
+    fscale   = max(1.0, ax_w / 12.0)
+    fs_title = round(10 * fscale)
+    fs_label = round(9  * fscale)
+    fs_tick  = round(8  * fscale)
+
+    cbar_w   = 0.30 * fscale
+    cbar_gap = 0.12 * fscale
+    pad_l    = max(0.70, fs_label / 72 * 2.5)
+    pad_r    = 0.20
+    pad_top  = max(0.65, fs_title / 72 * 2.0)
+    pad_bot  = max(0.55, fs_label / 72 * 2.0)
+
+    fig_w = pad_l + ax_w + cbar_gap + cbar_w + pad_r
     fig_h = pad_top + ax_h + pad_bot
 
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -305,23 +322,25 @@ def plot_annual_heatmap(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_
             )
             ax.add_patch(rect)
 
-
     ax.set_xlim(0, n_st * panel_w)
     ax.set_ylim(0, n_sa * panel_l)
-    ax.set_title('Sombra anual media', fontsize=13, fontweight='bold', pad=7)
-    ax.set_xlabel('String', fontsize=9, labelpad=4)
-    ax.set_ylabel('Subarray', fontsize=9, labelpad=4)
-    set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=8)
+    title = 'Sombra anual media' if label == 'Anual' else f'Sombra media — {label}'
+    ax.set_title(title, fontsize=fs_title, fontweight='bold', color='black',
+                 pad=round(7 * fscale))
+    ax.set_xlabel('String',   fontsize=fs_label, labelpad=round(4 * fscale))
+    ax.set_ylabel('Subarray', fontsize=fs_label, labelpad=round(4 * fscale))
+    set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=fs_tick)
 
-    cbar_left = pad_l / fig_w + ax_w / fig_w + 0.12 / fig_w
+    cbar_left = pad_l / fig_w + ax_w / fig_w + cbar_gap / fig_w
     cax = fig.add_axes([cbar_left, pad_bot / fig_h, cbar_w / fig_w, ax_h / fig_h])
     cbar = fig.colorbar(sm, cax=cax)
-    cbar.set_label('Sombra media anual (%)', fontsize=9)
-    cbar.ax.tick_params(labelsize=8)
+    cbar_label = 'Sombra media anual (%)' if label == 'Anual' else f'Sombra media {label} (%)'
+    cbar.set_label(cbar_label, fontsize=fs_label)
+    cbar.ax.tick_params(labelsize=fs_tick)
 
     plt.savefig(out_path, dpi=600, bbox_inches='tight')
     plt.close()
-    print(f'  Heatmap anual → {out_path}')
+    print(f'  Heatmap {label} → {out_path}')
 
 
 def plot_heatmaps(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out_path):
@@ -343,16 +362,23 @@ def plot_heatmaps(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out
     ax_w     = n_st * panel_w * cell_in
     ax_h     = n_sa * panel_l * cell_in
 
-    n_cols, n_rows = 3, 2
-    cbar_w   = 0.25
-    col_gap  = 0.80
-    row_gap  = 0.70
-    pad_l    = 0.55
-    pad_r    = 0.15
-    pad_top  = 0.55
-    pad_bot  = 0.40
+    fscale   = max(1.0, ax_w / 12.0)
+    fs_super = round(10 * fscale)
+    fs_title = round(8  * fscale)
+    fs_label = round(8  * fscale)
+    fs_tick  = round(7  * fscale)
 
-    slot_w   = ax_w + cbar_w + 0.15
+    n_cols, n_rows = 3, 2
+    cbar_w   = 0.25 * fscale
+    cbar_gap = 0.10 * fscale
+    col_gap  = 0.80 * fscale
+    row_gap  = 0.70 * fscale
+    pad_l    = max(0.55, fs_label / 72 * 2.5)
+    pad_r    = 0.15
+    pad_top  = max(0.55, fs_super / 72 * 2.5)
+    pad_bot  = max(0.40, fs_label / 72 * 2.0)
+
+    slot_w   = ax_w + cbar_w + cbar_gap
     fig_w    = pad_l + n_cols * slot_w + (n_cols - 1) * col_gap + pad_r
     fig_h    = pad_top + n_rows * ax_h + (n_rows - 1) * row_gap + pad_bot
 
@@ -385,22 +411,21 @@ def plot_heatmaps(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out
         ax.set_xlim(0, n_st * panel_w)
         ax.set_ylim(0, n_sa * panel_l)   # SA1 abajo, coincide con eje Y de la escena 3D
 
-        season_color = SEASON_COLORS.get(label, '#333333')
-        ax.set_title(label, fontsize=10, fontweight='bold', color=season_color, pad=4)
-        ax.set_xlabel('String', fontsize=8, labelpad=3)
-        ax.set_ylabel('Subarray', fontsize=8, labelpad=3)
+        ax.set_title(label, fontsize=fs_title, fontweight='bold', color='black',
+                     pad=round(4 * fscale))
+        ax.set_xlabel('String',   fontsize=fs_label, labelpad=round(3 * fscale))
+        ax.set_ylabel('Subarray', fontsize=fs_label, labelpad=round(3 * fscale))
 
-        set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=7)
+        set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=fs_tick)
 
-        cbar_left   = ax_left + ax_w / fig_w + 0.01
-        cbar_rect   = [cbar_left, ax_bottom, cbar_w / fig_w, ax_h / fig_h]
-        cax = fig.add_axes(cbar_rect)
+        cbar_left = ax_left + ax_w / fig_w + cbar_gap / fig_w
+        cax = fig.add_axes([cbar_left, ax_bottom, cbar_w / fig_w, ax_h / fig_h])
         cbar = fig.colorbar(sm, cax=cax)
-        cbar.set_label('Sombra (%)', fontsize=7)
-        cbar.ax.tick_params(labelsize=6)
+        cbar.set_label('Sombra (%)', fontsize=fs_label)
+        cbar.ax.tick_params(labelsize=fs_tick)
 
     fig.text(0.5, 1 - pad_top / fig_h / 2, 'Heatmap de sombra — geometría de paneles',
-             ha='center', va='top', fontsize=12, fontweight='bold')
+             ha='center', va='top', fontsize=fs_super, fontweight='bold')
 
     plt.savefig(out_path, dpi=600, bbox_inches='tight')
     plt.close()
@@ -437,16 +462,23 @@ def plot_irradiance_heatmaps(irr_grids, n_sa, n_st, sa_labels, st_labels,
     ax_w     = n_st * panel_w * cell_in
     ax_h     = n_sa * panel_l * cell_in
 
-    n_cols, n_rows = 3, 2
-    cbar_w   = 0.25
-    col_gap  = 0.80
-    row_gap  = 0.70
-    pad_l    = 0.55
-    pad_r    = 0.15
-    pad_top  = 0.65
-    pad_bot  = 0.40
+    fscale   = max(1.0, ax_w / 12.0)
+    fs_super = round(10 * fscale)
+    fs_title = round(8  * fscale)
+    fs_label = round(8  * fscale)
+    fs_tick  = round(7  * fscale)
 
-    slot_w   = ax_w + cbar_w + 0.15
+    n_cols, n_rows = 3, 2
+    cbar_w   = 0.25 * fscale
+    cbar_gap = 0.10 * fscale
+    col_gap  = 0.80 * fscale
+    row_gap  = 0.70 * fscale
+    pad_l    = max(0.55, fs_label / 72 * 2.5)
+    pad_r    = 0.15
+    pad_top  = max(0.65, fs_super / 72 * 2.5)
+    pad_bot  = max(0.40, fs_label / 72 * 2.0)
+
+    slot_w   = ax_w + cbar_w + cbar_gap
     fig_w    = pad_l + n_cols * slot_w + (n_cols - 1) * col_gap + pad_r
     fig_h    = pad_top + n_rows * ax_h + (n_rows - 1) * row_gap + pad_bot
 
@@ -479,23 +511,23 @@ def plot_irradiance_heatmaps(irr_grids, n_sa, n_st, sa_labels, st_labels,
         ax.set_xlim(0, n_st * panel_w)
         ax.set_ylim(0, n_sa * panel_l)
 
-        season_color = SEASON_COLORS.get(label, '#333333')
-        ax.set_title(label, fontsize=10, fontweight='bold', color=season_color, pad=4)
-        ax.set_xlabel('String', fontsize=8, labelpad=3)
-        ax.set_ylabel('Subarray', fontsize=8, labelpad=3)
+        ax.set_title(label, fontsize=fs_title, fontweight='bold', color='black',
+                     pad=round(4 * fscale))
+        ax.set_xlabel('String',   fontsize=fs_label, labelpad=round(3 * fscale))
+        ax.set_ylabel('Subarray', fontsize=fs_label, labelpad=round(3 * fscale))
 
-        set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=7)
+        set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=fs_tick)
 
-        cbar_left = ax_left + ax_w / fig_w + 0.01
+        cbar_left = ax_left + ax_w / fig_w + cbar_gap / fig_w
         cax = fig.add_axes([cbar_left, ax_bottom, cbar_w / fig_w, ax_h / fig_h])
         cbar = fig.colorbar(sm, cax=cax)
-        cbar.set_label('Irradiancia bloqueada (W/m²)', fontsize=7)
-        cbar.ax.tick_params(labelsize=6)
+        cbar.set_label('Irradiancia bloqueada (W/m²)', fontsize=fs_label)
+        cbar.ax.tick_params(labelsize=fs_tick)
 
     fig.text(
         0.5, 1 - pad_top / fig_h / 2,
         f'Irradiancia bloqueada por sombras — ref. {irradiance_ref:.0f} W/m²',
-        ha='center', va='top', fontsize=12, fontweight='bold'
+        ha='center', va='top', fontsize=fs_super, fontweight='bold'
     )
 
     plt.savefig(out_path, dpi=600, bbox_inches='tight')
@@ -503,10 +535,10 @@ def plot_irradiance_heatmaps(irr_grids, n_sa, n_st, sa_labels, st_labels,
     print(f'  Heatmap irradiancia → {out_path}')
 
 
-def plot_irradiance_annual_heatmap(irr_grids, n_sa, n_st, sa_labels, st_labels,
+def plot_irradiance_single_heatmap(irr_grids, label, n_sa, n_st, sa_labels, st_labels,
                                     panel_w, panel_l, irradiance_ref, out_path):
-    """Heatmap anual de irradiancia bloqueada, alta resolución."""
-    grid = irr_grids['Anual']
+    """Heatmap independiente de irradiancia bloqueada para un label (estación o 'Anual')."""
+    grid = irr_grids[label]
     all_vals = np.concatenate([g[~np.isnan(g)] for g in irr_grids.values()])
     vmin, vmax = np.percentile(all_vals, 2), np.percentile(all_vals, 98)
 
@@ -520,10 +552,20 @@ def plot_irradiance_annual_heatmap(irr_grids, n_sa, n_st, sa_labels, st_labels,
     cell_in  = 0.80
     ax_w     = n_st * panel_w * cell_in
     ax_h     = n_sa * panel_l * cell_in
-    cbar_w   = 0.30
-    pad_l, pad_r, pad_top, pad_bot = 0.70, 0.20, 0.65, 0.55
 
-    fig_w = pad_l + ax_w + 0.12 + cbar_w + pad_r
+    fscale   = max(1.0, ax_w / 12.0)
+    fs_title = round(10 * fscale)
+    fs_label = round(9  * fscale)
+    fs_tick  = round(8  * fscale)
+
+    cbar_w   = 0.30 * fscale
+    cbar_gap = 0.12 * fscale
+    pad_l    = max(0.70, fs_label / 72 * 2.5)
+    pad_r    = 0.20
+    pad_top  = max(0.65, fs_title / 72 * 2.0)
+    pad_bot  = max(0.55, fs_label / 72 * 2.0)
+
+    fig_w = pad_l + ax_w + cbar_gap + cbar_w + pad_r
     fig_h = pad_top + ax_h + pad_bot
 
     fig = plt.figure(figsize=(fig_w, fig_h))
@@ -546,23 +588,24 @@ def plot_irradiance_annual_heatmap(irr_grids, n_sa, n_st, sa_labels, st_labels,
 
     ax.set_xlim(0, n_st * panel_w)
     ax.set_ylim(0, n_sa * panel_l)
+    period = 'anual media' if label == 'Anual' else label
     ax.set_title(
-        f'Irradiancia bloqueada anual media — ref. {irradiance_ref:.0f} W/m²',
-        fontsize=12, fontweight='bold', pad=7
+        f'Irradiancia bloqueada {period} — ref. {irradiance_ref:.0f} W/m²',
+        fontsize=fs_title, fontweight='bold', color='black', pad=round(7 * fscale)
     )
-    ax.set_xlabel('String', fontsize=9, labelpad=4)
-    ax.set_ylabel('Subarray', fontsize=9, labelpad=4)
-    set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=8)
+    ax.set_xlabel('String',   fontsize=fs_label, labelpad=round(4 * fscale))
+    ax.set_ylabel('Subarray', fontsize=fs_label, labelpad=round(4 * fscale))
+    set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=fs_tick)
 
-    cbar_left = pad_l / fig_w + ax_w / fig_w + 0.12 / fig_w
+    cbar_left = pad_l / fig_w + ax_w / fig_w + cbar_gap / fig_w
     cax = fig.add_axes([cbar_left, pad_bot / fig_h, cbar_w / fig_w, ax_h / fig_h])
     cbar = fig.colorbar(sm, cax=cax)
-    cbar.set_label('Irradiancia bloqueada media (W/m²)', fontsize=9)
-    cbar.ax.tick_params(labelsize=8)
+    cbar.set_label('Irradiancia bloqueada media (W/m²)', fontsize=fs_label)
+    cbar.ax.tick_params(labelsize=fs_tick)
 
     plt.savefig(out_path, dpi=600, bbox_inches='tight')
     plt.close()
-    print(f'  Heatmap irradiancia anual → {out_path}')
+    print(f'  Heatmap irradiancia {label} → {out_path}')
 
 
 # ── MAIN ─────────────────────────────────────────────────────────────────────
@@ -620,11 +663,13 @@ def main():
             args.width, args.length,
             os.path.join(args.out, 'heatmap_panel_geometry.png')
         )
-        plot_annual_heatmap(
-            grids, n_sa, n_st, sa_labels, st_labels,
-            args.width, args.length,
-            os.path.join(args.out, 'heatmap_annual.png')
-        )
+        for lbl in list(SEASONS.keys()) + ['Anual']:
+            slug = season_slug(lbl)
+            plot_single_heatmap(
+                grids, lbl, n_sa, n_st, sa_labels, st_labels,
+                args.width, args.length,
+                os.path.join(args.out, f'heatmap_{slug}.png')
+            )
 
         # ── Heatmaps de irradiancia ───────────────────────────
         print(f'Generando heatmaps de irradiancia (ref. {args.irradiance:.0f} W/m²)...')
@@ -634,11 +679,13 @@ def main():
             args.width, args.length, args.irradiance,
             os.path.join(args.out, 'heatmap_irradiance.png')
         )
-        plot_irradiance_annual_heatmap(
-            irr_grids, n_sa, n_st, sa_labels, st_labels,
-            args.width, args.length, args.irradiance,
-            os.path.join(args.out, 'heatmap_irradiance_annual.png')
-        )
+        for lbl in list(SEASONS.keys()) + ['Anual']:
+            slug = season_slug(lbl)
+            plot_irradiance_single_heatmap(
+                irr_grids, lbl, n_sa, n_st, sa_labels, st_labels,
+                args.width, args.length, args.irradiance,
+                os.path.join(args.out, f'heatmap_irradiance_{slug}.png')
+            )
 
     print('\nCompletado.')
 
