@@ -1,21 +1,21 @@
 // ── PARÁMETROS DEL ARRAY ─────────────────────────────────
-rows = 10;
-cols = 8;
+rows = 11;
+cols = -114;
 
 irradiance_ref = 1000.0;   // Irradiancia de referencia (W/m²) para heatmaps de irradiancia
 
-x0 = 0.0;
-y0 = 0.0;
+x0 = -9.7;
+y0 = -15.20;
 z0 = 0.0;
 
-panel_length = 2.0;   // largo del panel (m)  → dirección filas (rows)
+panel_length = 1.0;   // largo del panel (m)  → dirección filas (rows)
 panel_width  = 1.0;   // ancho del panel (m)  → dirección columnas (cols)
 
 spacing_x = panel_length;   // separación entre filas   (>= panel_length)
 spacing_y = panel_width;    // separación entre columnas (>= panel_width)
 
-azimut     = 180;
-inclinacion = 30;
+azimut     = 225;
+inclinacion = 90;
 
 timestep_min = 60;
 
@@ -47,12 +47,20 @@ sam_tilt = acos(nz) * 180 / PI;
 sam_az   = atan2(nx, ny) * 180 / PI;
 if (sam_az < 0) { sam_az = sam_az + 360; }
 
+// ── SIGNO Y VALOR ABSOLUTO DE ROWS/COLS ─────────────────
+// Valores negativos invierten la dirección de expansión del array.
+// Ej: cols = -114 → la instalación crece en sentido opuesto al eje horizontal.
+abs_rows = rows; if (rows < 0) { abs_rows = -rows; }
+abs_cols = cols; if (cols < 0) { abs_cols = -cols; }
+sign_rows = 1;   if (rows < 0) { sign_rows = -1; }
+sign_cols = 1;   if (cols < 0) { sign_cols = -1; }
+
 // ── CÁLCULO DE BATCHES ───────────────────────────────────
 max_subarrays = 4;
 max_strings   = 8;
 max_surfaces  = max_subarrays * max_strings;   // 32 por batch
 
-n_total   = rows * cols;
+n_total   = abs_rows * abs_cols;
 n_batches = to_int((n_total + max_surfaces - 1) / max_surfaces);
 
 // ── VALIDACIONES ─────────────────────────────────────────
@@ -150,15 +158,15 @@ for (b = 0; b < n_batches; b++)
     for (local_idx = 0; local_idx < batch_count; local_idx++)
     {
         panel_idx  = batch_start + local_idx;
-        global_row = to_int(panel_idx / cols);
-        global_col = panel_idx - to_int(panel_idx / cols) * cols;
+        global_row = to_int(panel_idx / abs_cols);
+        global_col = panel_idx - to_int(panel_idx / abs_cols) * abs_cols;
 
         local_sub = to_int(local_idx / max_strings);
         local_str = local_idx - local_sub * max_strings;
 
-        px = x0 + global_col * spacing_y * dir_hx + global_row * spacing_x * dir_sx;
-        py = y0 + global_col * spacing_y * dir_hy + global_row * spacing_x * dir_sy;
-        pz = z0 +                                   global_row * spacing_x * dir_sz;
+        px = x0 + global_col * spacing_y * sign_cols * dir_hx + global_row * spacing_x * sign_rows * dir_sx;
+        py = y0 + global_col * spacing_y * sign_cols * dir_hy + global_row * spacing_x * sign_rows * dir_sy;
+        pz = z0 +                                                global_row * spacing_x * sign_rows * dir_sz;
 
         p = {};
         p.Name     = 'AS_r' + global_row + '_c' + global_col;
@@ -222,7 +230,7 @@ for (b = 0; b < n_batches; b++)
 // ── POST-PROCESO PYTHON ───────────────────────────────────
 outln('Todos los batches completados. Fusionando con Python...');
 
-py_cmd = '"' + py_exec + '" "' + py_script + '" --batches' + batch_files_arg + ' --out "' + results_dir + '" --width ' + panel_width + ' --length ' + panel_length + ' --cols ' + cols + ' --irradiance ' + irradiance_ref;
+py_cmd = '"' + py_exec + '" "' + py_script + '" --batches' + batch_files_arg + ' --out "' + results_dir + '" --width ' + panel_width + ' --length ' + panel_length + ' --cols ' + abs_cols + ' --irradiance ' + irradiance_ref;
 
 sh_file = '/tmp/sam_shade_post.sh';
 fh = open(sh_file, 'w');

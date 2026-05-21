@@ -81,6 +81,23 @@ MAX_SURFACES = 32   # límite SAM: 4 subarrays × 8 strings
 MAX_STRINGS  = 8    # strings por subarray en SAM
 
 
+def nice_tick_step(n, max_ticks=20):
+    """Paso de ticks tal que n/paso ≤ max_ticks."""
+    for step in [1, 2, 5, 10, 20, 25, 50, 100, 200]:
+        if n <= step * max_ticks:
+            return step
+    return max(1, n // max_ticks)
+
+
+def set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=7):
+    step_st = nice_tick_step(n_st)
+    step_sa = nice_tick_step(n_sa)
+    ax.set_xticks([(st + 0.5) * panel_w for st in range(0, n_st, step_st)])
+    ax.set_xticklabels([st_labels[st] for st in range(0, n_st, step_st)], fontsize=fs)
+    ax.set_yticks([(sa + 0.5) * panel_l for sa in range(0, n_sa, step_sa)])
+    ax.set_yticklabels([sa_labels[sa] for sa in range(0, n_sa, step_sa)], fontsize=fs)
+
+
 def local_to_global_label(local_name, batch_id, cols):
     """
     SAM genera nombres de grupo a partir de Subarray/String locales del batch,
@@ -203,7 +220,7 @@ def plot_seasonal_curves(seas_avg, groups, out_path):
     fig.suptitle('Sombra directa horaria promedio por estación',
                  fontsize=14, fontweight='bold')
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.savefig(out_path, dpi=600, bbox_inches='tight')
     plt.close()
     print(f'  Curvas estacionales → {out_path}')
 
@@ -294,10 +311,7 @@ def plot_annual_heatmap(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_
     ax.set_title('Sombra anual media', fontsize=13, fontweight='bold', pad=7)
     ax.set_xlabel('String', fontsize=9, labelpad=4)
     ax.set_ylabel('Subarray', fontsize=9, labelpad=4)
-    ax.set_xticks([(st + 0.5) * panel_w for st in range(n_st)])
-    ax.set_xticklabels(st_labels, fontsize=8)
-    ax.set_yticks([(sa + 0.5) * panel_l for sa in range(n_sa)])
-    ax.set_yticklabels(sa_labels, fontsize=8)
+    set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=8)
 
     cbar_left = pad_l / fig_w + ax_w / fig_w + 0.12 / fig_w
     cax = fig.add_axes([cbar_left, pad_bot / fig_h, cbar_w / fig_w, ax_h / fig_h])
@@ -305,7 +319,7 @@ def plot_annual_heatmap(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_
     cbar.set_label('Sombra media anual (%)', fontsize=9)
     cbar.ax.tick_params(labelsize=8)
 
-    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+    plt.savefig(out_path, dpi=600, bbox_inches='tight')
     plt.close()
     print(f'  Heatmap anual → {out_path}')
 
@@ -325,7 +339,7 @@ def plot_heatmaps(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out
     sm.set_array([])
 
     # ── Dimensiones físicas exactas por subplot ───────────────
-    cell_in  = 0.55           # pulgadas por metro de panel
+    cell_in  = 0.70           # pulgadas por metro de panel
     ax_w     = n_st * panel_w * cell_in
     ax_h     = n_sa * panel_l * cell_in
 
@@ -376,10 +390,7 @@ def plot_heatmaps(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out
         ax.set_xlabel('String', fontsize=8, labelpad=3)
         ax.set_ylabel('Subarray', fontsize=8, labelpad=3)
 
-        ax.set_xticks([(st + 0.5) * panel_w for st in range(n_st)])
-        ax.set_xticklabels(st_labels, fontsize=6)
-        ax.set_yticks([(sa + 0.5) * panel_l for sa in range(n_sa)])
-        ax.set_yticklabels(sa_labels, fontsize=6)
+        set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=7)
 
         cbar_left   = ax_left + ax_w / fig_w + 0.01
         cbar_rect   = [cbar_left, ax_bottom, cbar_w / fig_w, ax_h / fig_h]
@@ -391,7 +402,7 @@ def plot_heatmaps(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out
     fig.text(0.5, 1 - pad_top / fig_h / 2, 'Heatmap de sombra — geometría de paneles',
              ha='center', va='top', fontsize=12, fontweight='bold')
 
-    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.savefig(out_path, dpi=600, bbox_inches='tight')
     plt.close()
     print(f'  Heatmap → {out_path}')
 
@@ -422,7 +433,7 @@ def plot_irradiance_heatmaps(irr_grids, n_sa, n_st, sa_labels, st_labels,
     sm   = ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
 
-    cell_in  = 0.55
+    cell_in  = 0.70
     ax_w     = n_st * panel_w * cell_in
     ax_h     = n_sa * panel_l * cell_in
 
@@ -473,10 +484,7 @@ def plot_irradiance_heatmaps(irr_grids, n_sa, n_st, sa_labels, st_labels,
         ax.set_xlabel('String', fontsize=8, labelpad=3)
         ax.set_ylabel('Subarray', fontsize=8, labelpad=3)
 
-        ax.set_xticks([(st + 0.5) * panel_w for st in range(n_st)])
-        ax.set_xticklabels(st_labels, fontsize=6)
-        ax.set_yticks([(sa + 0.5) * panel_l for sa in range(n_sa)])
-        ax.set_yticklabels(sa_labels, fontsize=6)
+        set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=7)
 
         cbar_left = ax_left + ax_w / fig_w + 0.01
         cax = fig.add_axes([cbar_left, ax_bottom, cbar_w / fig_w, ax_h / fig_h])
@@ -490,7 +498,7 @@ def plot_irradiance_heatmaps(irr_grids, n_sa, n_st, sa_labels, st_labels,
         ha='center', va='top', fontsize=12, fontweight='bold'
     )
 
-    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.savefig(out_path, dpi=600, bbox_inches='tight')
     plt.close()
     print(f'  Heatmap irradiancia → {out_path}')
 
@@ -544,10 +552,7 @@ def plot_irradiance_annual_heatmap(irr_grids, n_sa, n_st, sa_labels, st_labels,
     )
     ax.set_xlabel('String', fontsize=9, labelpad=4)
     ax.set_ylabel('Subarray', fontsize=9, labelpad=4)
-    ax.set_xticks([(st + 0.5) * panel_w for st in range(n_st)])
-    ax.set_xticklabels(st_labels, fontsize=8)
-    ax.set_yticks([(sa + 0.5) * panel_l for sa in range(n_sa)])
-    ax.set_yticklabels(sa_labels, fontsize=8)
+    set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=8)
 
     cbar_left = pad_l / fig_w + ax_w / fig_w + 0.12 / fig_w
     cax = fig.add_axes([cbar_left, pad_bot / fig_h, cbar_w / fig_w, ax_h / fig_h])
@@ -555,7 +560,7 @@ def plot_irradiance_annual_heatmap(irr_grids, n_sa, n_st, sa_labels, st_labels,
     cbar.set_label('Irradiancia bloqueada media (W/m²)', fontsize=9)
     cbar.ax.tick_params(labelsize=8)
 
-    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+    plt.savefig(out_path, dpi=600, bbox_inches='tight')
     plt.close()
     print(f'  Heatmap irradiancia anual → {out_path}')
 
