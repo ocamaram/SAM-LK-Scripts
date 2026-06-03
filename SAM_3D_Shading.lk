@@ -1,11 +1,11 @@
 // ── PARÁMETROS DEL ARRAY ─────────────────────────────────
-rows = 11;
-cols = -114;
+rows = 126;//11;
+cols = 205;//-114;
 
 irradiance_ref = 1000.0;   // Irradiancia de referencia (W/m²) para heatmaps de irradiancia
 
-x0 = -9.7;
-y0 = -15.20;
+x0 = -131;//-9.7;
+y0 = 26.5;//-15.20;
 z0 = 0.0;
 
 panel_length = 1.0;   // largo del panel (m)  → dirección filas (rows)
@@ -14,8 +14,8 @@ panel_width  = 1.0;   // ancho del panel (m)  → dirección columnas (cols)
 spacing_x = panel_length;   // separación entre filas   (>= panel_length)
 spacing_y = panel_width;    // separación entre columnas (>= panel_width)
 
-azimut     = 225;
-inclinacion = 90;
+azimut     = 225;//225;
+inclinacion = 0;//90;
 
 timestep_min = 60;
 

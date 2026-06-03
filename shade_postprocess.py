@@ -7,6 +7,12 @@ Modos de entrada:
   --ts <archivo.csv>           Un único CSV (array ≤32 paneles)
   --batches <b0.csv> <b1.csv>  Varios CSVs de batches que se fusionan antes del análisis
 
+Opciones de irradiancia:
+  --irradiance-ts <archivo.csv>  Serie temporal de irradiancia horaria (W/m²) exportada
+                                  desde SAM. Si se omite, se usa --irradiance constante.
+  --irradiance-col <nombre>      Columna del CSV de irradiancia (default: primera columna).
+  --irradiance <W/m²>            Irradiancia constante de referencia (solo si no hay --irradiance-ts).
+
 Salidas:
   summary_statistics.csv        Resumen estadístico por panel
   seasonal_hourly_curves.png    Curvas de sombra horaria promedio por estación
@@ -89,13 +95,26 @@ def nice_tick_step(n, max_ticks=20):
     return max(1, n // max_ticks)
 
 
-def set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=7):
+def _fmt_m(v):
+    """Formatea un valor en metros: entero si es entero, un decimal si no."""
+    return f'{v:.0f}' if v % 1 == 0 else f'{v:.1f}'
+
+
+def set_axis_ticks(ax, n_st, n_sa, panel_w, panel_l, spacing_x=None, spacing_y=None, fs=7):
+    """Dibuja ticks con distancias en metros en lugar de etiquetas SA/ST."""
+    sp_y = spacing_y if spacing_y is not None else panel_w   # separación entre columnas
+    sp_x = spacing_x if spacing_x is not None else panel_l   # separación entre filas
+
     step_st = nice_tick_step(n_st)
     step_sa = nice_tick_step(n_sa)
-    ax.set_xticks([(st + 0.5) * panel_w for st in range(0, n_st, step_st)])
-    ax.set_xticklabels([st_labels[st] for st in range(0, n_st, step_st)], fontsize=fs)
-    ax.set_yticks([(sa + 0.5) * panel_l for sa in range(0, n_sa, step_sa)])
-    ax.set_yticklabels([sa_labels[sa] for sa in range(0, n_sa, step_sa)], fontsize=fs)
+
+    x_idxs = list(range(0, n_st, step_st)) + [n_st]
+    y_idxs = list(range(0, n_sa, step_sa)) + [n_sa]
+
+    ax.set_xticks([st * panel_w for st in x_idxs])
+    ax.set_xticklabels([_fmt_m(st * sp_y) for st in x_idxs], fontsize=fs)
+    ax.set_yticks([sa * panel_l for sa in y_idxs])
+    ax.set_yticklabels([_fmt_m(sa * sp_x) for sa in y_idxs], fontsize=fs)
 
 
 def local_to_global_label(local_name, batch_id, cols):
@@ -115,32 +134,84 @@ def local_to_global_label(local_name, batch_id, cols):
     return f'SA{global_row + 1}_ST{global_col + 1}'
 
 
-def load_timeseries(args):
+def load_irradiance_ts(path, col_name=None):
     """
-    Carga la serie temporal desde --ts (fichero único) o --batches (varios ficheros).
-    En modo batches, renombra las columnas de etiquetas locales SAM a etiquetas globales.
+    Carga la serie temporal de irradiancia horaria desde un CSV exportado por SAM.
+    La primera columna se trata como índice (SAM exporta horas como primera columna).
+    Devuelve una Series con los valores en las unidades originales del CSV.
     """
-    if args.batches:
+    df = pd.read_csv(path, index_col=0)
+    if col_name:
+        if col_name not in df.columns:
+            print(f'ERROR: columna "{col_name}" no encontrada en {path}.')
+            print(f'  Columnas disponibles: {list(df.columns)}')
+            sys.exit(1)
+        irr = df[col_name]
+    else:
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        if len(numeric_cols) == 0:
+            print(f'ERROR: no se encontraron columnas numéricas en {path}.')
+            sys.exit(1)
+        if len(numeric_cols) > 1:
+            print(f'  Irradiancia: columna auto-seleccionada "{numeric_cols[0]}" '
+                  f'(usa --irradiance-col para especificar otra).')
+        irr = df[numeric_cols[0]]
+
+    irr = irr.fillna(0.0).clip(lower=0.0)
+    return irr.reset_index(drop=True)
+
+
+def group_batches_by_orientation(batch_paths):
+    """
+    Agrupa los ficheros de batch por orientación (sufijo az<A>_inc<I>).
+    Devuelve un dict ordenado {az_inc: [path, ...]} con los ficheros de cada grupo.
+    Si no hay sufijo de orientación, todos van a la clave ''.
+    """
+    orient_re = re.compile(r'shade_batch\d+_(az\d+_inc\d+)\.csv$')
+    groups = {}
+    for path in batch_paths:
+        m = orient_re.search(os.path.basename(path))
+        key = m.group(1) if m else ''
+        groups.setdefault(key, []).append(path)
+    return dict(sorted(groups.items()))
+
+
+def load_timeseries(args, batch_paths=None):
+    """
+    Carga la serie temporal desde --ts (fichero único) o una lista de batch CSVs.
+    batch_paths sobreescribe args.batches cuando se llama por orientación.
+    """
+    paths = batch_paths if batch_paths is not None else args.batches
+    if paths:
         dfs = []
-        for path in args.batches:
-            # Extraer batch_id del nombre de archivo (shade_batch<N>_...)
+        for path in paths:
             m = re.search(r'shade_batch(\d+)_', os.path.basename(path))
             if not m:
                 print(f'ERROR: no se puede extraer batch_id de {os.path.basename(path)}')
-                print('El archivo debe llamarse shade_batch<N>_az<A>_inc<I>.csv')
                 sys.exit(1)
             batch_id = int(m.group(1))
 
+            if os.path.getsize(path) == 0:
+                print(f'  Batch {batch_id} omitido: {os.path.basename(path)}  (fichero vacío)')
+                continue
+
             df = pd.read_csv(path, index_col=0)
+            if df.empty or len(df.columns) == 0:
+                print(f'  Batch {batch_id} omitido: {os.path.basename(path)}  (sin datos)')
+                continue
+
             df.columns = [local_to_global_label(c, batch_id, args.cols) for c in df.columns]
             dfs.append(df)
             print(f'  Batch {batch_id} cargado: {os.path.basename(path)}  ({len(df.columns)} paneles)')
 
+        if not dfs:
+            return None
+
         ts_raw = pd.concat(dfs, axis=1)
         duplicates = ts_raw.columns[ts_raw.columns.duplicated()].tolist()
         if duplicates:
-            print(f'ERROR: etiquetas globales duplicadas: {duplicates}')
-            print('Comprueba que rows, cols y batch_id sean coherentes en todos los batches.')
+            print(f'ERROR: etiquetas globales duplicadas: {duplicates[:8]}...')
+            print('Comprueba que --cols sea correcto.')
             sys.exit(1)
     else:
         ts_raw = pd.read_csv(args.ts, index_col=0)
@@ -152,8 +223,8 @@ def load_timeseries(args):
 
 # ── ESTADÍSTICAS ────────────────────────────────────────────────────────────
 
-def compute_statistics(ts):
-    return pd.DataFrame({
+def compute_statistics(ts, irr_ts=None):
+    stats = {
         'sombra_media_%':   (ts.mean()          * 100).round(2),
         'sombra_mediana_%': (ts.median()         * 100).round(2),
         'sombra_p90_%':     (ts.quantile(0.90)   * 100).round(2),
@@ -161,7 +232,24 @@ def compute_statistics(ts):
         'h_con_sombra':     (ts > 0).sum(),
         'h_sombra_>10%':    (ts > 0.10).sum(),
         'h_sombra_>50%':    (ts > 0.50).sum(),
-    })
+    }
+
+    if irr_ts is not None:
+        irr_arr = irr_ts.values
+        irr_total = irr_arr.sum()   # Wh/m² totales del período
+        if irr_total > 0:
+            blocked = {col: float((irr_arr * ts[col].values).sum()) for col in ts.columns}
+            stats['sombra_irr_ponderada_%'] = pd.Series(
+                {col: round(v / irr_total * 100, 2) for col, v in blocked.items()}
+            )
+            stats['energia_bloqueada_kWh_m2'] = pd.Series(
+                {col: round(v / 1000, 2) for col, v in blocked.items()}
+            )
+            stats['energia_incidente_kWh_m2'] = pd.Series(
+                {col: round((irr_total - v) / 1000, 2) for col, v in blocked.items()}
+            )
+
+    return pd.DataFrame(stats)
 
 
 # ── CURVAS HORARIAS POR ESTACIÓN ─────────────────────────────────────────────
@@ -179,7 +267,7 @@ def seasonal_hourly_avg(ts):
     return result
 
 
-def plot_seasonal_curves(seas_avg, groups, out_path):
+def plot_seasonal_curves(seas_avg, groups, out_path, dpi=150):
     # sharex=False para que cada subplot muestre sus propias etiquetas de hora
     fig, axes = plt.subplots(2, 2, figsize=(14, 9), sharey=True, sharex=False)
     axes = axes.flatten()
@@ -221,7 +309,7 @@ def plot_seasonal_curves(seas_avg, groups, out_path):
     fig.suptitle('Sombra directa horaria promedio por estación',
                  fontsize=16, fontweight='bold')
     plt.tight_layout()
-    plt.savefig(out_path, dpi=600, bbox_inches='tight')
+    plt.savefig(out_path, dpi=dpi, bbox_inches='tight')
     plt.close()
     print(f'  Curvas estacionales → {out_path}')
 
@@ -272,11 +360,13 @@ def season_slug(label):
     return label.lower().translate(replacements)
 
 
-def plot_single_heatmap(grids, label, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out_path):
+def plot_single_heatmap(grids, label, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out_path,
+                         vmin=None, vmax=None, dpi=150, spacing_x=None, spacing_y=None):
     """Heatmap independiente para un label (estación o 'Anual'), escala común a todos los grids."""
     grid = grids[label]
-    all_vals = np.concatenate([g[~np.isnan(g)] for g in grids.values()])
-    vmin, vmax = np.percentile(all_vals, 2), np.percentile(all_vals, 98)
+    if vmin is None or vmax is None:
+        all_vals = np.concatenate([g[~np.isnan(g)] for g in grids.values()])
+        vmin, vmax = np.percentile(all_vals, 2), np.percentile(all_vals, 98)
 
     cmap = LinearSegmentedColormap.from_list(
         'shade', ['#fffde7', '#ffcc02', '#e65100'], N=256
@@ -327,9 +417,10 @@ def plot_single_heatmap(grids, label, n_sa, n_st, sa_labels, st_labels, panel_w,
     title = 'Sombra anual media' if label == 'Anual' else f'Sombra media — {label}'
     ax.set_title(title, fontsize=fs_title, fontweight='bold', color='black',
                  pad=round(7 * fscale))
-    ax.set_xlabel('String',   fontsize=fs_label, labelpad=round(4 * fscale))
-    ax.set_ylabel('Subarray', fontsize=fs_label, labelpad=round(4 * fscale))
-    set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=fs_tick)
+    ax.set_xlabel('x (m)', fontsize=fs_label, labelpad=round(4 * fscale))
+    ax.set_ylabel('y (m)', fontsize=fs_label, labelpad=round(4 * fscale))
+    set_axis_ticks(ax, n_st, n_sa, panel_w, panel_l,
+                   spacing_x=spacing_x, spacing_y=spacing_y, fs=fs_tick)
 
     cbar_left = pad_l / fig_w + ax_w / fig_w + cbar_gap / fig_w
     cax = fig.add_axes([cbar_left, pad_bot / fig_h, cbar_w / fig_w, ax_h / fig_h])
@@ -338,12 +429,13 @@ def plot_single_heatmap(grids, label, n_sa, n_st, sa_labels, st_labels, panel_w,
     cbar.set_label(cbar_label, fontsize=fs_label)
     cbar.ax.tick_params(labelsize=fs_tick)
 
-    plt.savefig(out_path, dpi=600, bbox_inches='tight')
+    plt.savefig(out_path, dpi=dpi, bbox_inches='tight')
     plt.close()
     print(f'  Heatmap {label} → {out_path}')
 
 
-def plot_heatmaps(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out_path):
+def plot_heatmaps(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out_path, dpi=150,
+                  spacing_x=None, spacing_y=None):
     labels  = list(grids.keys())   # 4 estaciones + Anual
     n_plots = len(labels)          # 5
 
@@ -413,10 +505,11 @@ def plot_heatmaps(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out
 
         ax.set_title(label, fontsize=fs_title, fontweight='bold', color='black',
                      pad=round(4 * fscale))
-        ax.set_xlabel('String',   fontsize=fs_label, labelpad=round(3 * fscale))
-        ax.set_ylabel('Subarray', fontsize=fs_label, labelpad=round(3 * fscale))
+        ax.set_xlabel('x (m)', fontsize=fs_label, labelpad=round(3 * fscale))
+        ax.set_ylabel('y (m)', fontsize=fs_label, labelpad=round(3 * fscale))
 
-        set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=fs_tick)
+        set_axis_ticks(ax, n_st, n_sa, panel_w, panel_l,
+                       spacing_x=spacing_x, spacing_y=spacing_y, fs=fs_tick)
 
         cbar_left = ax_left + ax_w / fig_w + cbar_gap / fig_w
         cax = fig.add_axes([cbar_left, ax_bottom, cbar_w / fig_w, ax_h / fig_h])
@@ -427,24 +520,84 @@ def plot_heatmaps(grids, n_sa, n_st, sa_labels, st_labels, panel_w, panel_l, out
     fig.text(0.5, 1 - pad_top / fig_h / 2, 'Heatmap de sombra — geometría de paneles',
              ha='center', va='top', fontsize=fs_super, fontweight='bold')
 
-    plt.savefig(out_path, dpi=600, bbox_inches='tight')
+    plt.savefig(out_path, dpi=dpi, bbox_inches='tight')
     plt.close()
     print(f'  Heatmap → {out_path}')
 
 
 # ── HEATMAPS DE IRRADIANCIA ──────────────────────────────────────────────────
 
+def build_irr_received_ts(ts, irr_ts):
+    """
+    Calcula la irradiancia recibida hora a hora para cada panel:
+        irr_received(t) = irradiance(t) × (1 - shade_fraction(t))
+    Devuelve un DataFrame con las mismas dimensiones que ts (en W/m²).
+    """
+    irr_arr = irr_ts.values.reshape(-1, 1)
+    return pd.DataFrame(
+        irr_arr * (1.0 - ts.values),
+        index=ts.index,
+        columns=ts.columns,
+    )
+
+
+def build_irradiance_grids_from_ts(ts, irr_ts, groups):
+    """
+    Construye grids de irradiancia media recibida (W/m²) ponderando la fracción de
+    sombra hora a hora por la irradiancia real.  Devuelve la misma estructura que
+    build_grids(): (grids_dict, n_sa, n_st, sa_labels, st_labels).
+    """
+    irr_received_ts = build_irr_received_ts(ts, irr_ts)
+
+    coords = {g: parse_group(g) for g in groups}
+    valid  = {g: c for g, c in coords.items() if c is not None}
+    if not valid:
+        print('AVISO: ningún grupo sigue el patrón SA_ST — heatmap irradiancia omitido.')
+        return None, 0, 0, [], []
+
+    n_sa = max(c[0] for c in valid.values())
+    n_st = max(c[1] for c in valid.values())
+
+    grids = {}
+    for season, months in SEASONS.items():
+        mask = irr_received_ts.index.month.isin(months)
+        seasonal_mean = irr_received_ts[mask].mean()
+        grid = np.full((n_sa, n_st), np.nan)
+        for g, (sa, st) in valid.items():
+            grid[sa - 1, st - 1] = seasonal_mean[g]
+        grids[season] = grid
+
+    grid_ann = np.full((n_sa, n_st), np.nan)
+    for g, (sa, st) in valid.items():
+        grid_ann[sa - 1, st - 1] = irr_received_ts[g].mean()
+    grids['Anual'] = grid_ann
+
+    ref = grid_ann
+    row_mask = ~np.all(np.isnan(ref), axis=1)
+    col_mask = ~np.all(np.isnan(ref), axis=0)
+    row_idx  = np.where(row_mask)[0]
+    col_idx  = np.where(col_mask)[0]
+
+    grids = {k: v[np.ix_(row_mask, col_mask)] for k, v in grids.items()}
+    sa_labels = [f'SA{i+1}' for i in row_idx]
+    st_labels = [f'ST{j+1}' for j in col_idx]
+
+    return grids, len(row_idx), len(col_idx), sa_labels, st_labels
+
+
 def build_irradiance_grids(shade_grids, irradiance_ref):
     """
-    Convierte grids de sombra (%) a irradiancia bloqueada (W/m²):
-        irradiance_blocked = irradiance_ref × shade_fraction
+    Convierte grids de sombra (%) a irradiancia recibida (W/m²):
+        irradiance_received = irradiance_ref × (1 - shade_fraction)
+    Fallback cuando no se dispone de serie temporal de irradiancia.
     """
-    return {label: grid * irradiance_ref / 100.0 for label, grid in shade_grids.items()}
+    return {label: (1.0 - grid / 100.0) * irradiance_ref for label, grid in shade_grids.items()}
 
 
 def plot_irradiance_heatmaps(irr_grids, n_sa, n_st, sa_labels, st_labels,
-                              panel_w, panel_l, irradiance_ref, out_path):
-    """Heatmaps estacionales + anual de irradiancia bloqueada por sombras."""
+                              panel_w, panel_l, irradiance_ref=None, out_path=None, dpi=150,
+                              spacing_x=None, spacing_y=None):
+    """Heatmaps estacionales + anual de irradiancia recibida (W/m²)."""
     labels  = list(irr_grids.keys())
     n_plots = len(labels)
 
@@ -513,34 +666,41 @@ def plot_irradiance_heatmaps(irr_grids, n_sa, n_st, sa_labels, st_labels,
 
         ax.set_title(label, fontsize=fs_title, fontweight='bold', color='black',
                      pad=round(4 * fscale))
-        ax.set_xlabel('String',   fontsize=fs_label, labelpad=round(3 * fscale))
-        ax.set_ylabel('Subarray', fontsize=fs_label, labelpad=round(3 * fscale))
+        ax.set_xlabel('x (m)', fontsize=fs_label, labelpad=round(3 * fscale))
+        ax.set_ylabel('y (m)', fontsize=fs_label, labelpad=round(3 * fscale))
 
-        set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=fs_tick)
+        set_axis_ticks(ax, n_st, n_sa, panel_w, panel_l,
+                       spacing_x=spacing_x, spacing_y=spacing_y, fs=fs_tick)
 
         cbar_left = ax_left + ax_w / fig_w + cbar_gap / fig_w
         cax = fig.add_axes([cbar_left, ax_bottom, cbar_w / fig_w, ax_h / fig_h])
         cbar = fig.colorbar(sm, cax=cax)
-        cbar.set_label('Irradiancia bloqueada (W/m²)', fontsize=fs_label)
+        cbar.set_label('Irradiancia recibida (W/m²)', fontsize=fs_label)
         cbar.ax.tick_params(labelsize=fs_tick)
 
+    if irradiance_ref is not None:
+        suptitle = f'Irradiancia recibida — ref. {irradiance_ref:.0f} W/m²'
+    else:
+        suptitle = 'Irradiancia media recibida (ponderada por irradiancia horaria real)'
     fig.text(
         0.5, 1 - pad_top / fig_h / 2,
-        f'Irradiancia bloqueada por sombras — ref. {irradiance_ref:.0f} W/m²',
+        suptitle,
         ha='center', va='top', fontsize=fs_super, fontweight='bold'
     )
 
-    plt.savefig(out_path, dpi=600, bbox_inches='tight')
+    plt.savefig(out_path, dpi=dpi, bbox_inches='tight')
     plt.close()
     print(f'  Heatmap irradiancia → {out_path}')
 
 
 def plot_irradiance_single_heatmap(irr_grids, label, n_sa, n_st, sa_labels, st_labels,
-                                    panel_w, panel_l, irradiance_ref, out_path):
-    """Heatmap independiente de irradiancia bloqueada para un label (estación o 'Anual')."""
+                                    panel_w, panel_l, irradiance_ref=None, out_path=None,
+                                    vmin=None, vmax=None, dpi=150, spacing_x=None, spacing_y=None):
+    """Heatmap independiente de irradiancia recibida para un label (estación o 'Anual')."""
     grid = irr_grids[label]
-    all_vals = np.concatenate([g[~np.isnan(g)] for g in irr_grids.values()])
-    vmin, vmax = np.percentile(all_vals, 2), np.percentile(all_vals, 98)
+    if vmin is None or vmax is None:
+        all_vals = np.concatenate([g[~np.isnan(g)] for g in irr_grids.values()])
+        vmin, vmax = np.percentile(all_vals, 2), np.percentile(all_vals, 98)
 
     cmap = LinearSegmentedColormap.from_list(
         'irradiance', ['#fff9c4', '#ff9800', '#b71c1c'], N=256
@@ -589,21 +749,24 @@ def plot_irradiance_single_heatmap(irr_grids, label, n_sa, n_st, sa_labels, st_l
     ax.set_xlim(0, n_st * panel_w)
     ax.set_ylim(0, n_sa * panel_l)
     period = 'anual media' if label == 'Anual' else label
-    ax.set_title(
-        f'Irradiancia bloqueada {period} — ref. {irradiance_ref:.0f} W/m²',
-        fontsize=fs_title, fontweight='bold', color='black', pad=round(7 * fscale)
-    )
-    ax.set_xlabel('String',   fontsize=fs_label, labelpad=round(4 * fscale))
-    ax.set_ylabel('Subarray', fontsize=fs_label, labelpad=round(4 * fscale))
-    set_axis_ticks(ax, n_st, n_sa, st_labels, sa_labels, panel_w, panel_l, fs=fs_tick)
+    if irradiance_ref is not None:
+        title_str = f'Irradiancia recibida {period} — ref. {irradiance_ref:.0f} W/m²'
+    else:
+        title_str = f'Irradiancia media recibida — {period}'
+    ax.set_title(title_str, fontsize=fs_title, fontweight='bold', color='black',
+                 pad=round(7 * fscale))
+    ax.set_xlabel('x (m)', fontsize=fs_label, labelpad=round(4 * fscale))
+    ax.set_ylabel('y (m)', fontsize=fs_label, labelpad=round(4 * fscale))
+    set_axis_ticks(ax, n_st, n_sa, panel_w, panel_l,
+                   spacing_x=spacing_x, spacing_y=spacing_y, fs=fs_tick)
 
     cbar_left = pad_l / fig_w + ax_w / fig_w + cbar_gap / fig_w
     cax = fig.add_axes([cbar_left, pad_bot / fig_h, cbar_w / fig_w, ax_h / fig_h])
     cbar = fig.colorbar(sm, cax=cax)
-    cbar.set_label('Irradiancia bloqueada media (W/m²)', fontsize=fs_label)
+    cbar.set_label('Irradiancia recibida media (W/m²)', fontsize=fs_label)
     cbar.ax.tick_params(labelsize=fs_tick)
 
-    plt.savefig(out_path, dpi=600, bbox_inches='tight')
+    plt.savefig(out_path, dpi=dpi, bbox_inches='tight')
     plt.close()
     print(f'  Heatmap irradiancia {label} → {out_path}')
 
@@ -617,75 +780,176 @@ def main():
     group.add_argument('--batches', nargs='+', metavar='CSV',
                        help='CSVs de múltiples batches a combinar')
     parser.add_argument('--out',    required=True, help='Carpeta de salida')
-    parser.add_argument('--width',  type=float, default=1.0, help='Ancho del panel (m)')
-    parser.add_argument('--length', type=float, default=1.0, help='Largo del panel (m)')
+    parser.add_argument('--width',     type=float, default=1.0, help='Ancho del panel (m)')
+    parser.add_argument('--length',    type=float, default=1.0, help='Largo del panel (m)')
+    parser.add_argument('--spacing-x', dest='spacing_x', type=float, default=None,
+                        help='Separación entre filas (m). Default: igual a --length.')
+    parser.add_argument('--spacing-y', dest='spacing_y', type=float, default=None,
+                        help='Separación entre columnas (m). Default: igual a --width.')
     parser.add_argument('--cols',       type=int,   default=8,
                         help='Número de columnas del array completo (necesario con --batches)')
+    parser.add_argument('--irradiance-ts', dest='irradiance_ts', metavar='CSV',
+                        help='CSV de irradiancia horaria exportado desde SAM. '
+                             'Si se especifica, los heatmaps usan irradiancia ponderada real.')
+    parser.add_argument('--irradiance-col', dest='irradiance_col', metavar='COLUMNA',
+                        help='Nombre de la columna de irradiancia en --irradiance-ts '
+                             '(default: primera columna numérica).')
+    parser.add_argument('--irradiance-area', dest='irradiance_area', type=float, metavar='M2',
+                        help='Área total del array en m². Si se especifica, convierte los valores '
+                             'de --irradiance-ts de kW a W/m² dividiéndolos por esta área.')
     parser.add_argument('--irradiance', type=float, default=1000.0,
-                        help='Irradiancia de referencia en W/m² para heatmaps de irradiancia (default: 1000)')
+                        help='Irradiancia constante de referencia en W/m² (solo si no se usa '
+                             '--irradiance-ts, default: 1000)')
+    parser.add_argument('--dpi', type=int, default=150,
+                        help='Resolución de las imágenes de salida (default: 150). Usa 300 para calidad de impresión.')
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
 
-    # ── Carga y fusión ───────────────────────────────────────
-    mode = f'{len(args.batches)} batches' if args.batches else '1 archivo'
-    print(f'Cargando datos ({mode})...')
-    ts_raw = load_timeseries(args)
-    groups = list(ts_raw.columns)
-    print(f'  {len(groups)} paneles en total: {groups[:4]}{"..." if len(groups) > 4 else ""}')
+    # ── Carga de irradiancia horaria (opcional, común a todas las orientaciones) ──
+    irr_ts_raw = None
+    if args.irradiance_ts:
+        print(f'Cargando irradiancia horaria desde {args.irradiance_ts}...')
+        irr_ts_raw = load_irradiance_ts(args.irradiance_ts, args.irradiance_col)
+        if args.irradiance_area:
+            if args.irradiance_area <= 0:
+                print('ERROR: --irradiance-area debe ser un valor positivo.')
+                sys.exit(1)
+            irr_ts_raw = irr_ts_raw * 1000.0 / args.irradiance_area
+            print(f'  Conversión kW → W/m²: ÷ {args.irradiance_area} m²')
 
-    # Los valores del time series están en % (0-100) → normalizar a fracción 0-1
-    if ts_raw.max().max() > 1.5:
-        ts_raw = ts_raw / 100.0
-        print('  Valores convertidos de % a fracción (0-1).')
+    # ── Determinar grupos de orientación ─────────────────────
+    if args.batches:
+        orient_groups = group_batches_by_orientation(args.batches)
+        multi = len(orient_groups) > 1
+    else:
+        orient_groups = {'': None}   # modo --ts
+        multi = False
 
-    # ── Estadísticas ─────────────────────────────────────────
-    print('Calculando estadísticas...')
-    stats = compute_statistics(ts_raw)
+    all_stats = []
+    all_ts_parts = []   # para curva estacional combinada
+
+    for orient, batch_paths in orient_groups.items():
+        prefix = f'{orient}_' if (multi and orient) else ''
+        header = f'Orientación {orient}' if (multi and orient) else 'datos'
+        n_files = len(batch_paths) if batch_paths else 1
+        print(f'\nCargando {header} ({n_files} batches)...')
+
+        ts = load_timeseries(args, batch_paths=batch_paths)
+        if ts is None:
+            print(f'  Sin datos para {orient}, omitido.')
+            continue
+        panels = list(ts.columns)
+        print(f'  {len(panels)} paneles: {panels[:4]}{"..." if len(panels) > 4 else ""}')
+
+        if ts.max().max() > 1.5:
+            ts = ts / 100.0
+            print('  Valores convertidos de % a fracción (0-1).')
+
+        # Alinear irradiancia con este TS
+        irr_ts = None
+        if irr_ts_raw is not None:
+            if len(irr_ts_raw) != len(ts):
+                print(f'ERROR: CSV de irradiancia ({len(irr_ts_raw)} filas) ≠ '
+                      f'sombras ({len(ts)} filas).')
+                sys.exit(1)
+            irr_ts = irr_ts_raw.copy()
+            irr_ts.index = ts.index
+            print(f'  Irradiancia media en horas de sol: {irr_ts[irr_ts > 0].mean():.1f} W/m²')
+
+        all_ts_parts.append(ts)
+
+        # ── Estadísticas ─────────────────────────────────────
+        print('  Calculando estadísticas...')
+        stats = compute_statistics(ts, irr_ts=irr_ts)
+        all_stats.append(stats)
+
+        # ── Curvas estacionales (por orientación si hay varias) ──
+        seas_avg = seasonal_hourly_avg(ts)
+        if multi:
+            plot_seasonal_curves(
+                seas_avg, panels,
+                os.path.join(args.out, f'{prefix}seasonal_hourly_curves.png'),
+                dpi=args.dpi,
+            )
+
+        # ── Heatmaps de sombra ────────────────────────────────
+        print('  Generando heatmaps de sombra...')
+        grids, n_sa, n_st, sa_labels, st_labels = build_grids(seas_avg, ts, panels)
+        if grids:
+            sp_x = args.spacing_x
+            sp_y = args.spacing_y
+            plot_heatmaps(
+                grids, n_sa, n_st, sa_labels, st_labels,
+                args.width, args.length,
+                os.path.join(args.out, f'{prefix}heatmap_panel_geometry.png'),
+                dpi=args.dpi, spacing_x=sp_x, spacing_y=sp_y,
+            )
+            all_shade_vals = np.concatenate([g[~np.isnan(g)] for g in grids.values()])
+            shade_vmin = float(np.percentile(all_shade_vals, 2))
+            shade_vmax = float(np.percentile(all_shade_vals, 98))
+            del all_shade_vals
+            for lbl in list(SEASONS.keys()) + ['Anual']:
+                slug = season_slug(lbl)
+                plot_single_heatmap(
+                    grids, lbl, n_sa, n_st, sa_labels, st_labels,
+                    args.width, args.length,
+                    os.path.join(args.out, f'{prefix}heatmap_{slug}.png'),
+                    vmin=shade_vmin, vmax=shade_vmax, dpi=args.dpi,
+                    spacing_x=sp_x, spacing_y=sp_y,
+                )
+
+            # ── Heatmaps de irradiancia ───────────────────────
+            if irr_ts is not None:
+                print('  Generando heatmaps de irradiancia ponderada...')
+                irr_grids, irr_n_sa, irr_n_st, irr_sa_lbl, irr_st_lbl = \
+                    build_irradiance_grids_from_ts(ts, irr_ts, panels)
+                irr_ref_arg = None
+            else:
+                print(f'  Generando heatmaps de irradiancia (ref. {args.irradiance:.0f} W/m²)...')
+                irr_grids = build_irradiance_grids(grids, args.irradiance)
+                irr_n_sa, irr_n_st = n_sa, n_st
+                irr_sa_lbl, irr_st_lbl = sa_labels, st_labels
+                irr_ref_arg = args.irradiance
+
+            if irr_grids:
+                plot_irradiance_heatmaps(
+                    irr_grids, irr_n_sa, irr_n_st, irr_sa_lbl, irr_st_lbl,
+                    args.width, args.length, irr_ref_arg,
+                    os.path.join(args.out, f'{prefix}heatmap_irradiance.png'),
+                    dpi=args.dpi, spacing_x=sp_x, spacing_y=sp_y,
+                )
+                all_irr_vals = np.concatenate([g[~np.isnan(g)] for g in irr_grids.values()])
+                irr_vmin = float(np.percentile(all_irr_vals, 2))
+                irr_vmax = float(np.percentile(all_irr_vals, 98))
+                del all_irr_vals
+                for lbl in list(SEASONS.keys()) + ['Anual']:
+                    slug = season_slug(lbl)
+                    plot_irradiance_single_heatmap(
+                        irr_grids, lbl, irr_n_sa, irr_n_st, irr_sa_lbl, irr_st_lbl,
+                        args.width, args.length, irr_ref_arg,
+                        os.path.join(args.out, f'{prefix}heatmap_irradiance_{slug}.png'),
+                        vmin=irr_vmin, vmax=irr_vmax, dpi=args.dpi,
+                        spacing_x=sp_x, spacing_y=sp_y,
+                    )
+
+    # ── Estadísticas combinadas ───────────────────────────────
+    print('\nGuardando estadísticas combinadas...')
+    combined_stats = pd.concat(all_stats)
     stats_path = os.path.join(args.out, 'summary_statistics.csv')
-    stats.to_csv(stats_path)
+    combined_stats.to_csv(stats_path)
     print(f'  Estadísticas → {stats_path}')
 
-    # ── Curvas estacionales ───────────────────────────────────
-    print('Generando curvas horarias por estación...')
-    seas_avg = seasonal_hourly_avg(ts_raw)
-    plot_seasonal_curves(
-        seas_avg, groups,
-        os.path.join(args.out, 'seasonal_hourly_curves.png')
-    )
-
-    # ── Heatmaps ─────────────────────────────────────────────
-    print('Generando heatmaps...')
-    grids, n_sa, n_st, sa_labels, st_labels = build_grids(seas_avg, ts_raw, groups)
-    if grids:
-        plot_heatmaps(
-            grids, n_sa, n_st, sa_labels, st_labels,
-            args.width, args.length,
-            os.path.join(args.out, 'heatmap_panel_geometry.png')
+    # ── Curva estacional combinada (todos los paneles) ────────
+    if all_ts_parts:
+        ts_all = pd.concat(all_ts_parts, axis=1)
+        print('Generando curvas horarias estacionales (todos los paneles)...')
+        seas_all = seasonal_hourly_avg(ts_all)
+        plot_seasonal_curves(
+            seas_all, list(ts_all.columns),
+            os.path.join(args.out, 'seasonal_hourly_curves.png'),
+            dpi=args.dpi,
         )
-        for lbl in list(SEASONS.keys()) + ['Anual']:
-            slug = season_slug(lbl)
-            plot_single_heatmap(
-                grids, lbl, n_sa, n_st, sa_labels, st_labels,
-                args.width, args.length,
-                os.path.join(args.out, f'heatmap_{slug}.png')
-            )
-
-        # ── Heatmaps de irradiancia ───────────────────────────
-        print(f'Generando heatmaps de irradiancia (ref. {args.irradiance:.0f} W/m²)...')
-        irr_grids = build_irradiance_grids(grids, args.irradiance)
-        plot_irradiance_heatmaps(
-            irr_grids, n_sa, n_st, sa_labels, st_labels,
-            args.width, args.length, args.irradiance,
-            os.path.join(args.out, 'heatmap_irradiance.png')
-        )
-        for lbl in list(SEASONS.keys()) + ['Anual']:
-            slug = season_slug(lbl)
-            plot_irradiance_single_heatmap(
-                irr_grids, lbl, n_sa, n_st, sa_labels, st_labels,
-                args.width, args.length, args.irradiance,
-                os.path.join(args.out, f'heatmap_irradiance_{slug}.png')
-            )
 
     print('\nCompletado.')
 

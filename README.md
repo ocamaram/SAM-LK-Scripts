@@ -42,7 +42,7 @@ Genera una cuadrícula de superficies activas en el **3D Shade Calculator** de S
 | `azimut` | Orientación solar — 0=N, 90=E, 180=S, 270=O (°) | `180` |
 | `inclinacion` | Inclinación — 0=horizontal, 90=vertical (°) | `30` |
 | `timestep_min` | Paso temporal del análisis (min) | `60` |
-| `irradiance_ref` | Irradiancia de referencia para heatmaps de irradiancia (W/m²) | `1000.0` |
+| `irradiance_ref` | Irradiancia de referencia para heatmaps (W/m²), usado si no se dispone de serie temporal | `1000.0` |
 
 > **Límites SAM:** máximo 32 superficies activas por análisis (4 subarrays × 8 strings). Arrays más grandes se procesan en múltiples batches automáticamente.
 
@@ -52,23 +52,21 @@ Genera una cuadrícula de superficies activas en el **3D Shade Calculator** de S
 2. Configura la **ubicación** en la pestaña *Location* (necesaria para el cálculo solar).
 3. Añade opcionalmente **obstáculos** de sombra (edificios, árboles…) en la pestaña *3D Scene* con la escena limpia (sin superficies activas).
 4. Abre la pestaña *Scripting*, carga `SAM_3D_Shading.lk` y ajusta los parámetros de la sección `PARÁMETROS`.
-5. Ejecuta el script. Los resultados se guardan en la subcarpeta `Results/` del directorio donde está el `.lk`.
+5. Ejecuta el script. Los resultados se guardan en la subcarpeta configurada en `results_dir`.
 
 > **Protocolo para modificar obstáculos:** pulsa *New* en SAM para limpiar la escena, añade los obstáculos nuevos y ejecuta el script. En ejecuciones normales (sin cambiar obstáculos) puedes ejecutar directamente.
 
 #### Archivos de salida
 
-Todos los archivos se guardan en `Results/` (subcarpeta creada automáticamente junto al script).
-
 | Archivo | Contenido |
 |---|---|
-| `shade_batch<N>_az<A>_inc<I>.csv` | Series temporales del factor de sombra directa (0–100) por batch — una columna por superficie, etiquetada `SA<sub>_ST<str>` |
+| `shade_batch<N>_az<A>_inc<I>.csv` | Series temporales del factor de sombra directa (0–100) por batch |
 | `summary_statistics.csv` | Resumen estadístico por panel (generado por `shade_postprocess.py`) |
 | `seasonal_hourly_curves.png` | Curvas horarias promedio de sombra por estación |
-| `heatmap_panel_geometry.png` | Heatmap de sombra (%) estacional y anual sobre la geometría de paneles |
-| `heatmap_annual.png` | Heatmap de sombra anual media en alta resolución (300 dpi) |
-| `heatmap_irradiance.png` | Heatmap de irradiancia bloqueada (W/m²) estacional y anual |
-| `heatmap_irradiance_annual.png` | Heatmap de irradiancia bloqueada anual en alta resolución (300 dpi) |
+| `heatmap_panel_geometry.png` | Heatmap de sombra (%) estacional y anual |
+| `heatmap_<estacion>.png` | Heatmap individual por estación y anual (alta resolución) |
+| `heatmap_irradiance.png` | Heatmap de irradiancia recibida (W/m²) estacional y anual |
+| `heatmap_irradiance_<estacion>.png` | Heatmap de irradiancia individual por estación y anual |
 
 ---
 
@@ -83,21 +81,27 @@ python3 shade_postprocess.py \
   --ts      Results/shade_batch0_az180_inc30.csv \
   --out     Results/ \
   --width   1.0 \
-  --length  2.0 \
-  --irradiance 1000
+  --length  1.0
 ```
 
-#### Modo multi-batch
+#### Modo multi-batch con irradiancia horaria real
 
 ```bash
 python3 shade_postprocess.py \
-  --batches Results/shade_batch0_az180_inc30.csv \
-             Results/shade_batch1_az180_inc30.csv \
+  --batches Results/shade_batch0_az225_inc0.csv \
+             Results/shade_batch1_az225_inc0.csv \
   --out      Results/ \
   --width    1.0 \
-  --length   2.0 \
-  --cols     8 \
-  --irradiance 1000
+  --length   1.0 \
+  --cols     205 \
+  --irradiance-ts  POA_total_radiation_nominal.csv
+```
+
+Si SAM exporta la irradiancia en kW totales del array (no en W/m²), añade `--irradiance-area` con el área total en m²:
+
+```bash
+  --irradiance-ts  POA_total_radiation_nominal.csv \
+  --irradiance-area 1254
 ```
 
 #### Argumentos
@@ -109,19 +113,33 @@ python3 shade_postprocess.py \
 | `--out` | Carpeta de salida | requerido |
 | `--width` | Ancho del panel (m) | `1.0` |
 | `--length` | Largo del panel (m) | `1.0` |
+| `--spacing-x` | Separación entre filas (m). Si difiere de `--length`, corrige las distancias en los ejes | `= --length` |
+| `--spacing-y` | Separación entre columnas (m). Si difiere de `--width`, corrige las distancias en los ejes | `= --width` |
 | `--cols` | Columnas del array completo (necesario con `--batches`) | `8` |
-| `--irradiance` | Irradiancia de referencia (W/m²) para los heatmaps de irradiancia | `1000.0` |
+| `--irradiance-ts` | CSV con irradiancia horaria exportada desde SAM (W/m² o kW). Activa ponderación temporal real | — |
+| `--irradiance-col` | Nombre de la columna en `--irradiance-ts` (auto-detecta si se omite) | primera columna numérica |
+| `--irradiance-area` | Área total del array (m²). Convierte los valores de `--irradiance-ts` de kW a W/m² | — |
+| `--irradiance` | Irradiancia constante de referencia (W/m²), solo si no se usa `--irradiance-ts` | `1000.0` |
+| `--dpi` | Resolución de las imágenes de salida | `150` |
+
+#### Cómo obtener la irradiancia horaria desde SAM
+
+En los resultados de simulación de SAM, busca la variable **"Array POA front-side total radiation nominal (kW)"** y expórtala a CSV. Esta variable contiene la irradiancia total incidente sobre el array antes de aplicar sombras. Si el CSV contiene valores en kW (no W/m²), usa `--irradiance-area` con el área total del array.
+
+> La ponderación temporal es importante porque una sombra del 50% al mediodía (irradiancia ~800 W/m²) implica cuatro veces más pérdida de energía que la misma sombra a primera hora de la mañana (~200 W/m²). La media simple de fracción de sombra subestima sistemáticamente el impacto real.
 
 #### Salidas
 
 | Archivo | Descripción |
 |---|---|
-| `summary_statistics.csv` | Media, mediana, P90, máximo y horas con sombra >10 % y >50 % por panel |
+| `summary_statistics.csv` | Estadísticas por panel: media, mediana, P90, máximo, horas con sombra >10%/>50%. Si se usa `--irradiance-ts`: añade `sombra_irr_ponderada_%`, `energia_bloqueada_kWh_m2` y `energia_incidente_kWh_m2` |
 | `seasonal_hourly_curves.png` | 4 subplots estacionales: sombra media horaria por panel + media del array |
-| `heatmap_panel_geometry.png` | Grid Subarray × String con sombra (%) por estación y anual; escala proporcional al panel |
-| `heatmap_annual.png` | Heatmap de sombra anual media en alta resolución |
-| `heatmap_irradiance.png` | Grid Subarray × String con irradiancia bloqueada (W/m²) = `irradiance_ref × shade_fraction`, por estación y anual |
-| `heatmap_irradiance_annual.png` | Heatmap de irradiancia bloqueada anual en alta resolución |
+| `heatmap_panel_geometry.png` | Grid con sombra (%) por estación y anual; ejes en metros |
+| `heatmap_<estacion>.png` | Heatmap individual de sombra por estación y anual |
+| `heatmap_irradiance.png` | Grid con irradiancia media recibida (W/m²) por estación y anual |
+| `heatmap_irradiance_<estacion>.png` | Heatmap individual de irradiancia por estación y anual |
+
+Los ejes de todos los heatmaps muestran distancias en metros (x, y). Si la separación entre paneles difiere del tamaño del panel, especifica `--spacing-x` / `--spacing-y` para obtener coordenadas físicas correctas.
 
 ---
 
